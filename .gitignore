@@ -1,0 +1,51 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables (contains API keys)
+.env
+.env.*
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Data directory contents (keep .gitkeep)
+data/*
+!data/.gitkeep
+
+# Workspace contents (keep .gitkeep)
+workspace/*
+!workspace/.gitkeep
+
+# Logs contents (keep .gitkeep)
+logs/*
+!logs/.gitkeep
