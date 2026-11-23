@@ -32,6 +32,10 @@ class Settings:
         # ---- Model Configuration ----
         self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
         self.ACTIVE_PROVIDER: str = os.getenv("ACTIVE_PROVIDER", "gemini")
+        # ---- Local AI Provider Settings ----
+        self.AI_PROVIDER: str = os.getenv("AI_PROVIDER", "ollama")
+        self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+        self.OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
 
         # ---- Application Limits ----
         self.MAX_CONVERSATION_HISTORY: int = int(
