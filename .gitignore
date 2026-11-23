@@ -18,6 +18,7 @@ __pycache__/
 dist/
 build/
 *.egg
+.pytest_cache/
 
 # IDE
 .vscode/
@@ -31,8 +32,11 @@ build/
 *.sqlite
 *.sqlite3
 
-# Logs
-logs/*.log
+# Logs and caches
+*.log
+logs/
+temp/
+tmp/
 
 # OS
 Thumbs.db
@@ -49,3 +53,16 @@ workspace/*
 # Logs contents (keep .gitkeep)
 logs/*
 !logs/.gitkeep
+
+# Local AI models
+models/
+*.gguf
+*.safetensors
+
+# Voice recordings
+recordings/
+*.wav
+*.mp3
+
+# Generated voice samples
+artifacts/voice_samples/
