@@ -7,14 +7,16 @@ A production-minded personal AI assistant and task execution agent built in Pyth
 ## Architecture Overview
 
 ```
-USER / CLI (interface/cli.py) ◄──────► VOICE CONTROLLER (voice/voice_controller.py)
-  │                                      ├── STT Engine (voice/speech_to_text.py)
-  │                                      └── TTS Engine (voice/text_to_speech.py)
+USER / CLI (interface/cli.py) ◄──────► HANDS-FREE MANAGER (voice/conversation_manager.py)
+  │                                      ├── Wake Word & VAD (voice/wake_word.py)
+  │                                      └── Voice Controller (voice/voice_controller.py)
+  │                                            ├── STT Engine (voice/speech_to_text.py — Faster-Whisper)
+  │                                            └── TTS Engine (voice/text_to_speech.py — Piper TTS)
   ▼
 JARVIS AGENT (core/agent.py)
   ├── Conversation Manager (core/conversation.py)
   ├── Task Planner (core/planner.py)
-  ├── Provider Manager (providers/base.py, gemini.py, factory.py)
+  ├── Provider Manager (providers/base.py, ollama.py, factory.py)
   ├── Tool Registry (tools/registry.py — 26 tools across 4 categories)
   │     ├── File Management (tools/filesystem.py)
   │     ├── System Automation (tools/system_automation.py)
@@ -107,33 +109,50 @@ JARVIS runs on Python 3.13 inside `.venv`:
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
-Open `.env` and configure your API key and voice preferences:
-```env
-GEMINI_API_KEY=your_actual_gemini_api_key
-GEMINI_MODEL=gemini-3.5-flash
-ACTIVE_PROVIDER=gemini
-LOG_LEVEL=INFO
-
-# Voice Settings
-VOICE_ENABLED=true
-STT_ENGINE=speech_recognition
-TTS_ENGINE=pyttsx3
-TTS_RATE=175
-TTS_VOLUME=0.9
-VOICE_MODE=push_to_talk
-```
-
-### 3. Launch JARVIS
+### 2. Download Local AI & Voice Models (One-Time Setup)
+Ensure [Ollama](https://ollama.com) is installed and pull the local model:
 ```powershell
-python main.py
+ollama pull qwen3.5:4b
 ```
+
+Download all required local STT, TTS, and Wake-Word models into `models/`:
+```powershell
+.\.venv\Scripts\python.exe setup_local_models.py
+```
+
+### 3. Configure Environment
+Copy `.env.example` to `.env`:
+```env
+AI_PROVIDER=ollama
+LOCAL_AI_ONLY=true
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3.5:4b
+
+# Voice & Hands-Free Wake Word
+VOICE_ENABLED=true
+VOICE_INPUT_ENABLED=true
+VOICE_OUTPUT_ENABLED=true
+WAKE_WORD_ENABLED=true
+WAKE_WORD_PHRASE=hey jarvis
+WAKE_WORD_THRESHOLD=0.5
+CONVERSATION_TIMEOUT_SECONDS=25
+VOICE_MODE=hands_free
+```
+
+### 4. Launch JARVIS
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+Say **"Hey JARVIS"** to activate hands-free mode, speak requests, ask follow-up questions without repeating the wake phrase, or say **"Goodbye JARVIS"** to return to wake-word listening.
 
 ### In-Session CLI Commands
-- `/voice` or `/voice ptt` — Trigger Push-to-Talk voice input (listen, transcribe, execute, speak)
-- `/voice continuous` — Enter Continuous Voice Mode for hands-free conversations
+- `/voice on` — Enable hands-free wake-word & microphone monitoring
+- `/voice off` — Stop microphone monitoring completely
+- `/voice status` — Show live wake-word, microphone, STT, and TTS status
+- `/voice test` — Run diagnostics on microphone, openWakeWord, Faster-Whisper, and Piper
+- `/voice` or `/voice ptt` — Trigger single Push-to-Talk voice input
 - `/voice text` — Switch to Text-only Mode
-- `/speak <text>` — Speak custom text aloud via TTS
+- `/speak <text>` — Speak custom text aloud via Piper TTS
 - `/tools` — View all 26 registered tools organized across the 4 categories
 - `/status` — View connectivity, audio subsystem state, and emergency stop status
 - `/history` — View recent tasks and execution outcomes
@@ -143,14 +162,14 @@ python main.py
 - `/clear` — Clear the conversation window and begin a new session
 - `/exit` — Shut down JARVIS safely
 
+See [HANDS_FREE_VOICE_SETUP.md](HANDS_FREE_VOICE_SETUP.md) for detailed microphone configuration, licensing notes (openWakeWord CC BY-NC-SA 4.0 / Piper GPL), privacy guarantees, and offline verification.
+
 ---
 
 ## Automated Test Verification
 
-Run all 116 unit tests:
+Run the automated test suite:
 
 ```powershell
 & ".\.venv\Scripts\pytest.exe" -v
 ```
-
-All 116 tests pass with zero paid API calls (using `MockProvider` and `MockSTTEngine`/`MockTTSEngine` for deterministic testing).

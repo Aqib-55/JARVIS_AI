@@ -1,14 +1,31 @@
-google-genai>=3.6.0,<4.0.0
+# Core application runtime
 python-dotenv>=1.0.0
 pydantic>=2.0.0
 psutil>=7.0.0
-pyttsx3>=2.90
-SpeechRecognition>=3.14.0
+
+# Local AI inference — Ollama HTTP client uses stdlib urllib; no extra package needed
+# (Optional: install official ollama package for future use)
+# ollama>=0.4.0
+
+# Local Speech Recognition — Faster-Whisper
+faster-whisper>=1.0.0
+
+# Local Speech Synthesis — Piper TTS (GPL)
+piper-tts>=1.2.0
+
+# Local Wake Word Detection — openWakeWord (Apache 2.0 code, CC BY-NC-SA 4.0 models)
+openwakeword>=0.6.0
+
+# Audio capture and playback
 PyAudio>=0.2.14
 sounddevice>=0.5.0
+soundfile>=0.12.0
+SpeechRecognition>=3.14.0
 numpy>=2.0.0
-edge-tts>=7.0.0
+
+# Windows SAPI5 TTS (offline fallback, non-default)
+pyttsx3>=2.90
+
+# Testing
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
-
-

@@ -50,6 +50,7 @@ class VoiceController:
         mode: VoiceMode = VoiceMode.PUSH_TO_TALK,
         on_state_change: Callable[[AudioState], None] | None = None,
         on_transcription: Callable[[str], None] | None = None,
+        on_speech_unavailable: Callable[[str], None] | None = None,
     ) -> None:
         self._agent = agent
         self._stt = stt_engine or get_stt_engine()
@@ -59,6 +60,7 @@ class VoiceController:
 
         self._on_state_change = on_state_change
         self._on_transcription = on_transcription
+        self._on_speech_unavailable = on_speech_unavailable
 
         self._stop_listening_event = threading.Event()
         self._interrupt_speech_event = threading.Event()
@@ -83,7 +85,9 @@ class VoiceController:
         logger.info("VoiceController mode changed to: %s", mode.value)
 
     def _set_state(self, state: AudioState) -> None:
-        """Internal helper to update state and trigger notification callback."""
+        """Internal helper to update state and trigger notification callback on change."""
+        if self._state == state:
+            return
         self._state = state
         logger.debug("VoiceController state: %s", state.value)
         if self._on_state_change:
@@ -166,6 +170,10 @@ class VoiceController:
                 timeout=timeout,
                 cancel_event=self._stop_listening_event,
             )
+        except RuntimeError as e:
+            logger.error("STT setup/runtime error: %s", e)
+            self._set_state(AudioState.ERROR)
+            return str(e)
         except Exception as e:
             logger.error("Microphone listening error: %s", e)
             self._set_state(AudioState.ERROR)
@@ -183,7 +191,6 @@ class VoiceController:
         is_cmd, cmd_resp = self._handle_voice_command(transcription)
         if is_cmd:
             self.speak_response(cmd_resp)
-            self._set_state(AudioState.IDLE)
             return cmd_resp
 
         # 3. Process via Agent
@@ -196,9 +203,8 @@ class VoiceController:
             self._set_state(AudioState.ERROR)
             agent_response = f"An error occurred while executing your request: {e}"
 
-        # 4. Spoken Output
+        # 4. Spoken Output (speak_response handles SPEAKING/IDLE transitions)
         self.speak_response(agent_response)
-        self._set_state(AudioState.IDLE)
         return agent_response
 
     # ------------------------------------------------------------------
@@ -247,12 +253,41 @@ class VoiceController:
     def speak_response(self, text: str) -> bool:
         """
         Convert text response to speech safely.
+        Transitions to AudioState.SPEAKING only after audio generation succeeds
+        and playback begins. If speech generation/playback fails, notifies the
+        caller without claiming spoken playback succeeded.
         """
         if not text:
+            self._set_state(AudioState.IDLE)
             return True
 
-        self._set_state(AudioState.SPEAKING)
-        success = self._tts.speak(text, interrupt_event=self._interrupt_speech_event)
+        def _on_playback_start() -> None:
+            self._set_state(AudioState.SPEAKING)
+
+        import inspect
+        speak_params = inspect.signature(self._tts.speak).parameters
+        if "on_playback_start" in speak_params:
+            success = self._tts.speak(
+                text,
+                interrupt_event=self._interrupt_speech_event,
+                on_playback_start=_on_playback_start,
+            )
+        else:
+            success = self._tts.speak(text, interrupt_event=self._interrupt_speech_event)
+            if success:
+                _on_playback_start()
+
+        if not success and not self._interrupt_speech_event.is_set():
+            reason = getattr(self._tts, "last_error", "") or (
+                "Piper voice model missing or audio output unavailable"
+            )
+            logger.warning("Speech output unavailable: %s", reason)
+            if self._on_speech_unavailable:
+                try:
+                    self._on_speech_unavailable(reason)
+                except Exception as e:
+                    logger.error("Speech unavailable callback error: %s", e)
+
         self._set_state(AudioState.IDLE)
         return success
 

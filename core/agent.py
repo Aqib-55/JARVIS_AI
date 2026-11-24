@@ -3,7 +3,7 @@ JARVIS Agent — the central intelligent task execution orchestrator.
 
 Coordinates:
 - Conversation manager (session sliding window)
-- AI provider (Gemini with function calling & retry logic)
+- AI provider (Ollama with native function calling)
 - Task planner (dependency-aware multi-step planning)
 - Task executor (permission validation & execution engine)
 - Tool registry (categorized tools across files, system, productivity, dev)
@@ -34,9 +34,19 @@ from tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# Base system instruction defining agent behavior and safety rules
+# Base system instruction defining agent behavior, architecture honesty, and safety rules
 SYSTEM_INSTRUCTION = """\
-You are JARVIS, a highly competent, production-minded personal AI task-execution assistant.
+You are JARVIS, a highly competent, local-first personal AI task-execution assistant.
+
+Runtime Architecture & Truthfulness Rules:
+- Your AI reasoning engine is local Ollama running a local model (see Runtime System Diagnostics below). You are NOT powered by Gemini or any cloud LLM.
+- Your speech recognition (STT) engine is local Faster-Whisper and your speech synthesis (TTS) engine is local Piper, when available per Runtime System Diagnostics.
+- NEVER claim or imply that you are connected to cloud AI services, remote APIs, or external servers unless a tool execution explicitly accessed one.
+- NEVER fabricate or claim that an external API was called without actual tool output evidence.
+- Distinguish clearly between:
+  1. Local AI & Core Subsystems (Ollama LLM, Faster-Whisper STT, Piper TTS, SQLite memory, file/system/productivity/development tools) — these operate locally without external internet.
+  2. Network-Dependent Registered Tools — specifically `open_website` (which opens a URL in the user's browser and requires external internet for remote websites), or user-requested `execute_approved_command` commands targeting external hosts.
+- When asked about your offline status, connectivity, AI provider, voice engines, or model state, answer strictly using the live `[Runtime System Diagnostics]` section below — never guess or invent status.
 
 Your capabilities:
 1. File Management: List, create, read, copy, move, rename, and delete files inside the workspace.
@@ -91,8 +101,15 @@ class JarvisAgent:
 
         # Interactive approval callback
         self._approval_callback = approval_callback
+        self._voice_diagnostics_provider: Callable[[], dict[str, Any]] | None = None
 
         self._connected = False
+
+    def set_voice_diagnostics_provider(
+        self, provider: Callable[[], dict[str, Any]] | None
+    ) -> None:
+        """Attach a callback returning live STT/TTS diagnostics for prompt grounding."""
+        self._voice_diagnostics_provider = provider
 
     # ------------------------------------------------------------------
     #  Initialization & Shutdown
@@ -200,7 +217,7 @@ class JarvisAgent:
     ) -> str:
         """
         Executes multi-step tool calls autonomously.
-        Runs tool calls -> feeds results back to Gemini -> if Gemini requests further
+        Runs tool calls -> feeds results back to Ollama -> if Ollama requests further
         tools (e.g. step 2 after inspecting results), repeats until complete or max turns reached.
         """
         current_response = initial_response
@@ -296,7 +313,7 @@ class JarvisAgent:
                 reply = final_model_resp.text or f"❌ Task halted at step '{plan.steps[-1].tool_name}': {plan.error}"
                 return self._store_and_return(reply)
 
-            # 5. Build function responses for Gemini
+            # 5. Build function responses for Ollama
             func_responses = []
             for fc, step in zip(function_calls, plan.steps):
                 data = step.result if isinstance(step.result, dict) else {"result": step.result}
@@ -305,7 +322,7 @@ class JarvisAgent:
             messages = self._conversation.get_messages()
             tool_declarations = self._registry.get_declarations()
 
-            # 6. Send results back to Gemini
+            # 6. Send results back to Ollama
             current_response = self._provider.send_function_results(
                 messages=messages,
                 function_calls=function_calls,
@@ -337,12 +354,43 @@ class JarvisAgent:
 
         return self._store_and_return(final_reply)
 
+    def _get_runtime_diagnostics_block(self) -> str:
+        """Build a live diagnostic summary grounded strictly in application state."""
+        status = self.get_status()
+        voice_diag: dict[str, Any] = {}
+        if self._voice_diagnostics_provider is not None:
+            try:
+                voice_diag = self._voice_diagnostics_provider() or {}
+            except Exception as e:
+                logger.warning("Voice diagnostics lookup failed: %s", e)
+
+        stt_name = voice_diag.get("stt_engine", settings.STT_ENGINE)
+        stt_avail = voice_diag.get("stt_available", False)
+        tts_name = voice_diag.get("tts_engine", settings.TTS_ENGINE)
+        tts_avail = voice_diag.get("tts_available", False)
+        voice_mode = voice_diag.get("mode", "disabled" if not voice_diag else settings.VOICE_MODE)
+
+        lines = [
+            "[Runtime System Diagnostics]:",
+            f"- AI Provider: {status['provider']} (local endpoint: {settings.OLLAMA_BASE_URL})",
+            f"- AI Model: {status['model']}",
+            f"- Local AI Only Mode: {'enabled (no Gemini, no cloud AI/STT/TTS fallback)' if settings.LOCAL_AI_ONLY else 'disabled'}",
+            f"- Provider Connected: {status['connected']}",
+            f"- Persistent Memory: SQLite ({status['memory']})",
+            f"- STT Engine: {stt_name} (available: {stt_avail}, local model path: {settings.WHISPER_MODEL_PATH})",
+            f"- TTS Engine: {tts_name} (available: {tts_avail}, configured voice: {settings.PIPER_VOICE}, dir: {settings.PIPER_MODEL_PATH})",
+            f"- Voice Mode: {voice_mode}",
+            f"- Registered Tools: {status['tools']} (local tools: files, calculator, datetime, system metrics/apps, notes/reminders/tasks, dev tools; network-dependent tool: open_website)",
+        ]
+        return "\n".join(lines)
+
     def _build_dynamic_instruction(self, user_input: str) -> str:
-        """Augment standard system instructions with relevant user context."""
+        """Augment system instructions with live runtime diagnostics and user memory."""
+        diagnostics = self._get_runtime_diagnostics_block()
         context = self._memory_manager.get_relevant_context(user_input)
         if context:
-            return f"{SYSTEM_INSTRUCTION}\n\n[Retrieved Context from Memory]:\n{context}"
-        return SYSTEM_INSTRUCTION
+            return f"{SYSTEM_INSTRUCTION}\n\n{diagnostics}\n\n[Retrieved Context from Memory]:\n{context}"
+        return f"{SYSTEM_INSTRUCTION}\n\n{diagnostics}"
 
     def _store_and_return(self, reply: str) -> str:
         """Store the assistant response in active conversation and history."""

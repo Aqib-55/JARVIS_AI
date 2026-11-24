@@ -1,7 +1,14 @@
 """
-JARVIS AI — Personal AI Assistant and Task Execution Agent
+JARVIS AI — Entry Point
 
-Entry point.  Run:  python main.py
+Run:  python main.py
+
+This application uses a fully local AI and voice stack:
+  AI Provider:  Ollama (http://127.0.0.1:11434) — model: qwen3.5:4b
+  STT:          Faster-Whisper (local CPU inference)
+  TTS:          Piper (local neural voice)
+  Memory:       SQLite
+  Tools:        26 registered across 4 categories
 """
 
 import logging
@@ -30,13 +37,13 @@ def setup_logging() -> None:
         ],
     )
 
-    # Keep the console handler quiet so it doesn't clutter the CLI
+    # Keep console quiet so it doesn't clutter the CLI
     for handler in logging.getLogger().handlers:
         if isinstance(handler, logging.StreamHandler) and handler.stream is sys.stderr:
             handler.setLevel(logging.WARNING)
 
     # Suppress noisy third-party loggers
-    for name in ("httpcore", "httpx", "urllib3", "google"):
+    for name in ("httpcore", "httpx", "urllib3", "urllib.request"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
@@ -95,17 +102,18 @@ def main() -> None:
         print("See .env.example for configuration instructions.\n")
         sys.exit(1)
 
-    # --- Create provider ---
+    # --- Create provider (Ollama) ---
     try:
-        provider = get_provider(settings.ACTIVE_PROVIDER)
-    except ValueError as e:
+        provider = get_provider(settings.AI_PROVIDER)
+    except (ValueError, RuntimeError) as e:
         print(f"\n⚠️  Provider error: {e}\n")
         sys.exit(1)
 
     # --- Create tool registry ---
     registry = ToolRegistry()
     register_tools(registry)
-    logger.info("Registered %d tools.", len(registry.list_tools()))
+    tool_count = len(registry.list_tools())
+    logger.info("Registered %d tools.", tool_count)
 
     # --- Create database ---
     db = DatabaseManager()
@@ -118,15 +126,17 @@ def main() -> None:
         approval_callback=JarvisCLI.approval_callback,
     )
 
-    # --- Initialise (connects to Gemini, creates DB tables) ---
+    # --- Initialize (connects to Ollama, creates DB tables) ---
     print("\n🔄 Initializing JARVIS…")
     if not agent.initialize():
         print("\n⚠️  Failed to initialize JARVIS.")
-        print("Please check your API key and internet connection.\n")
+        print("Please ensure Ollama is running: ollama serve")
+        print(f"And that model '{settings.OLLAMA_MODEL}' is available: ollama list\n")
         sys.exit(1)
 
-    # --- Launch the CLI ---
+    # --- Launch the CLI (hands-free wake-word starts automatically if enabled) ---
     cli = JarvisCLI(agent)
+    agent._approval_callback = cli.handle_approval_request
     cli.run()
 
 
