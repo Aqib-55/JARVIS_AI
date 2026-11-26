@@ -168,20 +168,22 @@ class OpenWakeWordDetector:
             )
             keys = list(self._model.models.keys())
             self._model_key = keys[0] if keys else paths["wakeword"].stem
+            self._flush_silence_locked()
             self.last_error = ""
             logger.info("openWakeWord model '%s' loaded locally on ONNX Runtime.", self._model_key)
 
     def _flush_silence_locked(self) -> None:
         """
-        Flush AudioFeatures with deterministic zeros after openwakeword.Model.reset(),
-        because AudioFeatures.reset() seeds feature_buffer with random noise that can
-        cause spurious false positives on the first utterance after reset.
+        Flush the full 4-second AudioFeatures buffer with deterministic zeros
+        after openwakeword.Model init/reset, preventing random-noise spillover
+        from triggering false positives on phonetically similar phrases.
         """
         if self._model is None:
             return
-        zero_frame = np.zeros(WAKEWORD_FRAME_SAMPLES, dtype=np.int16)
-        for _ in range(16):
-            self._model.predict(zero_frame)
+        self._model.preprocessor(np.zeros(TARGET_SAMPLE_RATE * 4, dtype=np.int16))
+        for key in self._model.models:
+            self._model.prediction_buffer[key].clear()
+            self._model.prediction_buffer[key].extend([0.0] * 5)
 
     def reset(self) -> None:
         """Clear buffered audio features & prediction history to prevent re-triggering."""

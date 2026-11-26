@@ -26,11 +26,9 @@ from tools.registry import ToolRegistry
 from voice.speech_to_text import (
     FasterWhisperEngine,
     MockSTTEngine,
-    SpeechRecognitionEngine,
     get_stt_engine,
 )
 from voice.text_to_speech import (
-    EdgeTTSEngine,
     MockTTSEngine,
     PiperEngine,
     get_tts_engine,
@@ -260,14 +258,13 @@ class TestOfflinePromptAndNoCloudFallback:
         with pytest.raises(RuntimeError, match="LOCAL_AI_ONLY"):
             get_provider("gemini")
         with pytest.raises(RuntimeError, match="LOCAL_AI_ONLY"):
-            SpeechRecognitionEngine()
-        with pytest.raises(RuntimeError, match="LOCAL_AI_ONLY"):
-            EdgeTTSEngine()
-        with pytest.raises(RuntimeError, match="LOCAL_AI_ONLY"):
             get_stt_engine("speech_recognition")
         with pytest.raises(RuntimeError, match="LOCAL_AI_ONLY"):
             get_tts_engine("edge_tts")
+        with pytest.raises(RuntimeError, match="LOCAL_AI_ONLY"):
+            get_tts_engine("pyttsx3")
         assert "google.genai" not in sys.modules
+        assert "providers.gemini" not in sys.modules
 
     def test_external_internet_blocked_still_allows_local_voice_stack(self, monkeypatch, tmp_path):
         real_create_conn = socket.create_connection

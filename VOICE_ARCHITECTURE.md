@@ -1,4 +1,4 @@
-# JARVIS AI — Voice Subsystem Architecture (Phase 3)
+# JARVIS AI — Voice Subsystem Architecture
 
 ## 1. Architectural Pipeline
 
@@ -6,32 +6,38 @@
   ┌─────────────────┐
   │   MICROPHONE    │
   └────────┬────────┘
-           │ PCM Audio Stream (PyAudio / sounddevice)
+           │ 16 kHz Mono int16 PCM (sounddevice, single owner)
+           ▼
+  ┌─────────────────────────────────┐
+  │    WAKE WORD & SILERO VAD       │
+  │      (voice/wake_word.py)       │
+  │ • openWakeWord ONNX (Hey JARVIS)│
+  │ • Silero VAD v6 Endpointing     │
+  └────────┬────────────────────────┘
+           │ Captured Utterance (float32 in-memory)
            ▼
   ┌─────────────────────────────────┐
   │     SPEECH-TO-TEXT (STT)        │
   │   (voice/speech_to_text.py)     │
-  │ • Ambient Noise Calibration     │
-  │ • Silence / Pause Detection     │
-  │ • Google STT / Faster-Whisper   │
+  │ • Faster-Whisper (CPU INT8)     │
+  │ • English / Hindi Auto-Detect   │
   └────────┬────────────────────────┘
            │ Recognized Text
            ▼
   ┌─────────────────────────────────┐
-  │        VOICE CONTROLLER         │
-  │   (voice/voice_controller.py)   │
-  │ • Voice Command Interceptor     │ ◄────── State Transitions:
-  │ • State Machine Manager         │         IDLE -> LISTENING -> PROCESSING
-  │ • Interrupt Event Coordinator   │         -> SPEAKING -> IDLE
+  │  CONVERSATION & VOICE CONTROL   │
+  │ (voice/conversation_manager.py, │
+  │  voice/voice_controller.py)     │
+  │ • Pipeline & Audio State        │
+  │ • Follow-up Window (25s)        │
   └────────┬────────────────────────┘
-           │ User Instruction
+           │ User Instruction (serialized via _agent_lock)
            ▼
   ┌─────────────────────────────────┐
   │       JARVIS CORE AGENT         │
   │        (core/agent.py)          │
-  │ • Intent & Context Augmentation │
-  │ • Planner (core/planner.py)     │
-  │ • 4-Tier Security & Approvals   │
+  │ • Ollama + Qwen 3.5 4B          │
+  │ • Planner & 4-Tier Safety Gates │
   │ • Tool Executor (26 tools)      │
   └────────┬────────────────────────┘
            │ Agent Response (Text)
@@ -40,10 +46,9 @@
   │     TEXT-TO-SPEECH (TTS)        │
   │    (voice/text_to_speech.py)    │
   │ • Markdown / Code Sanitizer     │
-  │ • Sentence Chunking Buffer      │
-  │ • SAPI5 pyttsx3 / edge-tts      │
+  │ • Piper TTS (en_GB-alan-medium) │
   └────────┬────────────────────────┘
-           │ Audio Playback
+           │ Audio Playback (sounddevice / winsound)
            ▼
   ┌─────────────────┐
   │    SPEAKERS     │
@@ -87,7 +92,6 @@ stateDiagram-v2
    - The CLI remains responsive while audio operations execute.
    - Long TTS responses are split into sentence chunks using regex `(?<=[.!?])\s+`.
 2. **Immediate Stop Signals**:
-   - `VoiceController.stop_speaking()` signals `threading.Event._stop_event`.
-   - The pyttsx3/audio worker immediately aborts the current speech chunk without lagging.
+   - `VoiceController.stop_speaking()` signals `threading.Event` interrupt to halt active Piper WAV playback immediately, and `/voice off` closes the `sounddevice` input stream completely.
 3. **Emergency Stop Interception**:
    - Triggering `/stop` simultaneously sets the emergency stop flag in `PermissionManager`, halts active speech via `VoiceController.stop_speaking()`, and terminates recording.

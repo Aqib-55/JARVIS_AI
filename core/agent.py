@@ -11,6 +11,7 @@ Coordinates:
 - Permission manager (4-tier security model & emergency stop)
 """
 
+import inspect
 import logging
 from typing import Any, Callable
 
@@ -34,34 +35,19 @@ from tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# Base system instruction defining agent behavior, architecture honesty, and safety rules
+# Base system instruction defining concise local-first behavior, architecture honesty, and safety rules
 SYSTEM_INSTRUCTION = """\
-You are JARVIS, a highly competent, local-first personal AI task-execution assistant.
+You are JARVIS, a concise local-first AI task-execution assistant.
 
-Runtime Architecture & Truthfulness Rules:
-- Your AI reasoning engine is local Ollama running a local model (see Runtime System Diagnostics below). You are NOT powered by Gemini or any cloud LLM.
-- Your speech recognition (STT) engine is local Faster-Whisper and your speech synthesis (TTS) engine is local Piper, when available per Runtime System Diagnostics.
-- NEVER claim or imply that you are connected to cloud AI services, remote APIs, or external servers unless a tool execution explicitly accessed one.
-- NEVER fabricate or claim that an external API was called without actual tool output evidence.
-- Distinguish clearly between:
-  1. Local AI & Core Subsystems (Ollama LLM, Faster-Whisper STT, Piper TTS, SQLite memory, file/system/productivity/development tools) — these operate locally without external internet.
-  2. Network-Dependent Registered Tools — specifically `open_website` (which opens a URL in the user's browser and requires external internet for remote websites), or user-requested `execute_approved_command` commands targeting external hosts.
-- When asked about your offline status, connectivity, AI provider, voice engines, or model state, answer strictly using the live `[Runtime System Diagnostics]` section below — never guess or invent status.
+Architecture & Honesty Rules:
+- Your LLM runs locally via Ollama; speech input uses local Faster-Whisper and speech output uses local Piper (per Runtime System Diagnostics below). Never claim cloud AI or unexecuted external APIs.
+- Local tools (files, calculator, datetime, system info/apps, notes/reminders/tasks, dev tools) run offline; `open_website` requires internet for external URLs.
+- Answer offline/connectivity/engine questions strictly from `[Runtime System Diagnostics]` below.
 
-Your capabilities:
-1. File Management: List, create, read, copy, move, rename, and delete files inside the workspace.
-2. System Automation: Check CPU, RAM, and Disk metrics; list processes; launch approved apps and websites.
-3. Productivity: Manage persistent notes, reminders, todo tasks, and summarize text.
-4. Development Assistance: Create verified Python files, read source code, analyze errors, run sandboxed scripts, and run approved commands.
-
-Operating Principles:
-- Understand user intent carefully. When crucial information or parameters are missing, ask for clarification.
-- Break complex instructions into clear, logical steps.
-- Explain the planned operation before executing moderate or high risk actions.
-- Never execute destructive actions (e.g. deleting files) without explicit confirmation.
-- If a tool fails, report the error clearly and offer a recovery strategy.
-- Never fabricate information — use tools to inspect real state.
-- All file operations must stay strictly within approved directories.
+Operating & Safety Rules:
+- Be concise and natural for voice and CLI. Ask clarification when parameters are missing.
+- Never execute destructive operations without confirmation; stay strictly inside approved workspace directories.
+- Never fabricate tool results; report errors clearly.
 """
 
 
@@ -164,11 +150,15 @@ class JarvisAgent:
     #  Message Processing & Autonomous Multi-Step Execution
     # ------------------------------------------------------------------
 
-    def process_message(self, user_input: str) -> str:
+    def process_message(
+        self,
+        user_input: str,
+        stream_callback: Callable[[str], None] | None = None,
+    ) -> str:
         """
         Process a user instruction end-to-end.
-        Supports autonomous multi-step tool calls, context retrieval,
-        and safe error recovery.
+        Supports autonomous multi-step tool calls, optional streaming of final text,
+        context retrieval, and safe error recovery.
         """
         if not self._connected:
             return "⚠️ Not connected to AI provider. Please check your configuration."
@@ -188,18 +178,32 @@ class JarvisAgent:
             tool_declarations = self._registry.get_declarations()
 
             # First turn: model decides whether to respond directly or request tools
-            response = self._provider.generate_with_tools(
-                messages=messages,
-                tool_declarations=tool_declarations,
-                system_instruction=dynamic_instruction,
-            )
+            gwt_params = inspect.signature(self._provider.generate_with_tools).parameters
+            if stream_callback is not None and "stream_callback" in gwt_params:
+                response = self._provider.generate_with_tools(
+                    messages=messages,
+                    tool_declarations=tool_declarations,
+                    system_instruction=dynamic_instruction,
+                    stream_callback=stream_callback,
+                )
+            else:
+                response = self._provider.generate_with_tools(
+                    messages=messages,
+                    tool_declarations=tool_declarations,
+                    system_instruction=dynamic_instruction,
+                )
 
             if response.is_error:
                 return self._store_and_return(f"⚠️ {response.error}")
 
             # If the model requested tool execution, enter the autonomous execution loop
             if response.has_function_calls:
-                return self._autonomous_execution_loop(user_input, response, dynamic_instruction)
+                return self._autonomous_execution_loop(
+                    user_input,
+                    response,
+                    dynamic_instruction,
+                    stream_callback=stream_callback,
+                )
 
             # Plain text response
             reply = response.text or "I'm not sure how to respond to that."
@@ -214,6 +218,7 @@ class JarvisAgent:
         user_request: str,
         initial_response: ModelResponse,
         system_instruction: str,
+        stream_callback: Callable[[str], None] | None = None,
     ) -> str:
         """
         Executes multi-step tool calls autonomously.
@@ -323,13 +328,24 @@ class JarvisAgent:
             tool_declarations = self._registry.get_declarations()
 
             # 6. Send results back to Ollama
-            current_response = self._provider.send_function_results(
-                messages=messages,
-                function_calls=function_calls,
-                function_responses=func_responses,
-                tool_declarations=tool_declarations,
-                system_instruction=system_instruction,
-            )
+            sfr_params = inspect.signature(self._provider.send_function_results).parameters
+            if stream_callback is not None and "stream_callback" in sfr_params:
+                current_response = self._provider.send_function_results(
+                    messages=messages,
+                    function_calls=function_calls,
+                    function_responses=func_responses,
+                    tool_declarations=tool_declarations,
+                    system_instruction=system_instruction,
+                    stream_callback=stream_callback,
+                )
+            else:
+                current_response = self._provider.send_function_results(
+                    messages=messages,
+                    function_calls=function_calls,
+                    function_responses=func_responses,
+                    tool_declarations=tool_declarations,
+                    system_instruction=system_instruction,
+                )
 
             if current_response.is_error:
                 self._task_history.update_task(
@@ -355,7 +371,7 @@ class JarvisAgent:
         return self._store_and_return(final_reply)
 
     def _get_runtime_diagnostics_block(self) -> str:
-        """Build a live diagnostic summary grounded strictly in application state."""
+        """Build a concise live diagnostic block grounded in actual application state."""
         status = self.get_status()
         voice_diag: dict[str, Any] = {}
         if self._voice_diagnostics_provider is not None:
@@ -371,16 +387,10 @@ class JarvisAgent:
         voice_mode = voice_diag.get("mode", "disabled" if not voice_diag else settings.VOICE_MODE)
 
         lines = [
-            "[Runtime System Diagnostics]:",
-            f"- AI Provider: {status['provider']} (local endpoint: {settings.OLLAMA_BASE_URL})",
-            f"- AI Model: {status['model']}",
-            f"- Local AI Only Mode: {'enabled (no Gemini, no cloud AI/STT/TTS fallback)' if settings.LOCAL_AI_ONLY else 'disabled'}",
-            f"- Provider Connected: {status['connected']}",
-            f"- Persistent Memory: SQLite ({status['memory']})",
-            f"- STT Engine: {stt_name} (available: {stt_avail}, local model path: {settings.WHISPER_MODEL_PATH})",
-            f"- TTS Engine: {tts_name} (available: {tts_avail}, configured voice: {settings.PIPER_VOICE}, dir: {settings.PIPER_MODEL_PATH})",
-            f"- Voice Mode: {voice_mode}",
-            f"- Registered Tools: {status['tools']} (local tools: files, calculator, datetime, system metrics/apps, notes/reminders/tasks, dev tools; network-dependent tool: open_website)",
+            "[Runtime System Diagnostics]",
+            f"Provider: {status['provider']} ({settings.OLLAMA_BASE_URL}) | Model: {status['model']} | Local Only: {settings.LOCAL_AI_ONLY} | Connected: {status['connected']}",
+            f"Memory: SQLite ({status['memory']}) | Tools: {status['tools']} (local except open_website)",
+            f"STT: {stt_name} (available: {stt_avail}) | TTS: {tts_name} (available: {tts_avail}, voice: {settings.PIPER_VOICE}) | Mode: {voice_mode}",
         ]
         return "\n".join(lines)
 

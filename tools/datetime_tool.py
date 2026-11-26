@@ -65,16 +65,12 @@ def get_datetime(detail: str = "full") -> ToolResult:
 # ---- Tool definition for the registry ----
 definition = ToolDefinition(
     name="get_datetime",
-    description=(
-        "Get the current date, time, weekday, or timezone. "
-        "Use detail='full' for all information, or specify "
-        "'date', 'time', 'weekday', or 'timezone'."
-    ),
+    description="Get current date, time, weekday, or timezone.",
     parameters=[
         ToolParameter(
             name="detail",
             type="string",
-            description="What to return: 'date', 'time', 'weekday', 'timezone', or 'full'.",
+            description="Detail level.",
             required=False,
             enum=["date", "time", "weekday", "timezone", "full"],
         ),

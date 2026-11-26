@@ -192,3 +192,44 @@ class TestProviderFactory:
         from providers.factory import get_provider
         with pytest.raises(ValueError, match="Unknown provider"):
             get_provider("openai")
+
+
+class TestPerformanceAndStreaming:
+
+    def test_payload_includes_keep_alive_and_num_ctx(self):
+        p = OllamaProvider(keep_alive="10m", num_ctx=8192)
+        payload = p._build_payload(
+            messages=[Message(role=MessageRole.USER, content="hello")],
+            system_instruction="sys",
+            tools=None,
+            stream=False,
+        )
+        assert payload["keep_alive"] == "10m"
+        assert payload["options"]["num_ctx"] == 8192
+        assert payload["think"] is False
+
+    def test_build_ollama_tools_caches_identical_declaration_names(self):
+        p = OllamaProvider()
+        decls = [{"name": "get_datetime", "description": "Date", "parameters": {}}]
+        first = p._build_ollama_tools(decls)
+        second = p._build_ollama_tools(decls)
+        assert first is second
+
+    def test_streaming_forwards_text_deltas(self, provider):
+        chunks = [
+            b'{"message": {"role": "assistant", "content": "Hello "}, "done": false}\n',
+            b'{"message": {"role": "assistant", "content": "world."}, "done": true}\n',
+        ]
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = iter(chunks)
+        mock_resp.__exit__.return_value = False
+
+        deltas = []
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            res = provider.generate(
+                messages=[Message(role=MessageRole.USER, content="hi")],
+                stream_callback=deltas.append,
+            )
+
+        assert deltas == ["Hello ", "world."]
+        assert res.text == "Hello world."

@@ -104,6 +104,7 @@ class HandsFreeConversationManager:
         self._turn_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._manual_wake_event = threading.Event()
+        self._speaking_active = threading.Event()
         self._worker_thread: threading.Thread | None = None
 
         self.last_error: str = ""
@@ -268,6 +269,10 @@ class HandsFreeConversationManager:
             if frame is None:
                 continue
 
+            # Ignore microphone frames while Piper is speaking aloud from CLI/voice
+            if self._speaking_active.is_set():
+                continue
+
             try:
                 triggered, _ = self._wake_detector.process_pcm(frame)
             except Exception as e:
@@ -294,12 +299,17 @@ class HandsFreeConversationManager:
         """
         if not text or not settings.VOICE_OUTPUT_ENABLED:
             return True
-        self._set_state(VoicePipelineState.SPEAKING_WITH_PIPER)
-        ok = self._voice.speak_response(text)
-        # Drain mic queue so JARVIS doesn't self-trigger on speaker output
-        self._mic.drain()
-        self._wake_detector.reset()
-        return ok
+        self._speaking_active.set()
+        try:
+            self._set_state(VoicePipelineState.SPEAKING_WITH_PIPER)
+            ok = self._voice.speak_response(text)
+            # Small settle window so trailing speaker echo enters queue and gets drained
+            time.sleep(0.15)
+            self._mic.drain()
+            self._wake_detector.reset()
+            return ok
+        finally:
+            self._speaking_active.clear()
 
     @staticmethod
     def _is_goodbye(transcript: str) -> bool:

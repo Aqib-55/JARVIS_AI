@@ -1,8 +1,7 @@
 """
 Provider factory — creates the active AI model provider instance.
 
-JARVIS currently uses Ollama as its sole local AI provider.
-Gemini has been removed from active use.
+JARVIS uses Ollama as its sole local AI provider.
 
 To add another local provider in future:
   1. Create providers/newprovider.py implementing BaseProvider.

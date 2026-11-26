@@ -19,7 +19,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 from config.settings import settings
 from providers.base import (
@@ -43,10 +43,11 @@ class OllamaProvider(BaseProvider):
     Local Ollama AI provider using the native /api/chat endpoint.
 
     Supports:
-    - Streaming disabled (stream=false) for structured responses.
+    - Model residency via keep_alive (default 10m) and configurable num_ctx.
+    - Optional token streaming with tool-call safety (never streams partial tool JSON).
     - Native tool definitions via the 'tools' parameter.
     - tool_calls parsing from message.tool_calls.
-    - Thinking-trace suppression: message.thinking is ignored; only message.content is used.
+    - Thinking-trace suppression (think=false; message.thinking ignored).
     - Multi-turn conversation history.
     """
 
@@ -55,11 +56,17 @@ class OllamaProvider(BaseProvider):
         base_url: str = "",
         model: str = "",
         timeout: int = 0,
+        keep_alive: str = "",
+        num_ctx: int = 0,
     ) -> None:
         self._base_url = (base_url or settings.OLLAMA_BASE_URL).rstrip("/")
         self._model = model or settings.OLLAMA_MODEL
         self._timeout = timeout or settings.OLLAMA_TIMEOUT
+        self._keep_alive = keep_alive or settings.OLLAMA_KEEP_ALIVE
+        self._num_ctx = num_ctx or settings.OLLAMA_NUM_CTX
         self._connected = False
+        self._cached_tools_key: tuple[str, ...] | None = None
+        self._cached_ollama_tools: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     #  Connection / Health
@@ -99,13 +106,15 @@ class OllamaProvider(BaseProvider):
             )
             return False
 
-        # 3. Quick sanity generation
+        # 3. Quick sanity generation (also keeps model resident via keep_alive & num_ctx)
         try:
             payload = {
                 "model": self._model,
-                "messages": [{"role": "user", "content": "Reply with the single word: OK"}],
+                "messages": [{"role": "user", "content": "OK"}],
                 "stream": False,
                 "think": False,
+                "keep_alive": self._keep_alive,
+                "options": {"num_ctx": self._num_ctx},
             }
             resp = self._http_post(_CHAT_PATH, payload)
             content = resp.get("message", {}).get("content", "")
@@ -117,7 +126,8 @@ class OllamaProvider(BaseProvider):
 
         self._connected = True
         logger.info(
-            "Ollama connected — model: %s, endpoint: %s", self._model, self._base_url
+            "Ollama connected — model: %s, endpoint: %s, keep_alive: %s, num_ctx: %d",
+            self._model, self._base_url, self._keep_alive, self._num_ctx,
         )
         return True
 
@@ -129,17 +139,22 @@ class OllamaProvider(BaseProvider):
         self,
         messages: list[Message],
         system_instruction: str | None = None,
+        stream_callback: Callable[[str], None] | None = None,
     ) -> ModelResponse:
         """Generate a plain text response without tool definitions."""
         if not self._connected:
             return ModelResponse(error="Ollama provider not connected. Call connect() first.")
 
+        use_stream = stream_callback is not None
         payload = self._build_payload(
             messages=messages,
             system_instruction=system_instruction,
             tools=None,
+            stream=use_stream,
         )
         try:
+            if use_stream:
+                return self._http_post_stream(_CHAT_PATH, payload, stream_callback)
             resp = self._http_post(_CHAT_PATH, payload)
             return self._parse_response(resp)
         except OllamaConnectionError as e:
@@ -157,6 +172,7 @@ class OllamaProvider(BaseProvider):
         messages: list[Message],
         tool_declarations: list[dict[str, Any]],
         system_instruction: str | None = None,
+        stream_callback: Callable[[str], None] | None = None,
     ) -> ModelResponse:
         """
         Generate a response with native tool-call capability.
@@ -167,13 +183,17 @@ class OllamaProvider(BaseProvider):
         if not self._connected:
             return ModelResponse(error="Ollama provider not connected. Call connect() first.")
 
+        use_stream = stream_callback is not None
         ollama_tools = self._build_ollama_tools(tool_declarations)
         payload = self._build_payload(
             messages=messages,
             system_instruction=system_instruction,
             tools=ollama_tools,
+            stream=use_stream,
         )
         try:
+            if use_stream:
+                return self._http_post_stream(_CHAT_PATH, payload, stream_callback)
             resp = self._http_post(_CHAT_PATH, payload)
             return self._parse_response(resp)
         except OllamaConnectionError as e:
@@ -193,16 +213,11 @@ class OllamaProvider(BaseProvider):
         function_responses: list[FunctionResponse],
         tool_declarations: list[dict[str, Any]],
         system_instruction: str | None = None,
+        stream_callback: Callable[[str], None] | None = None,
     ) -> ModelResponse:
         """
-        Build a conversation that includes:
-          - prior messages
-          - assistant's tool-call message (required by Ollama API)
-          - tool result messages (role=tool)
-        Then request the model's final answer.
-
-        Ollama expects the conversation to include the assistant's tool_calls
-        message verbatim before the tool result messages.
+        Build a conversation that includes prior messages, assistant tool_calls,
+        and tool result messages (role=tool), then request the model's final answer.
         """
         if not self._connected:
             return ModelResponse(error="Ollama provider not connected. Call connect() first.")
@@ -238,17 +253,22 @@ class OllamaProvider(BaseProvider):
                 "name": fr.name,
             })
 
+        use_stream = stream_callback is not None
         ollama_tools = self._build_ollama_tools(tool_declarations)
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": ollama_msgs,
-            "stream": False,
+            "stream": use_stream,
             "think": False,
+            "keep_alive": self._keep_alive,
+            "options": {"num_ctx": self._num_ctx},
         }
         if ollama_tools:
             payload["tools"] = ollama_tools
 
         try:
+            if use_stream:
+                return self._http_post_stream(_CHAT_PATH, payload, stream_callback)
             resp = self._http_post(_CHAT_PATH, payload)
             return self._parse_response(resp)
         except OllamaConnectionError as e:
@@ -266,12 +286,15 @@ class OllamaProvider(BaseProvider):
         messages: list[Message],
         system_instruction: str | None,
         tools: list[dict] | None,
+        stream: bool = False,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": self._messages_to_ollama(messages, system_instruction),
-            "stream": False,
+            "stream": stream,
             "think": False,  # Suppress internal thinking from response
+            "keep_alive": self._keep_alive,
+            "options": {"num_ctx": self._num_ctx},
         }
         if tools:
             payload["tools"] = tools
@@ -298,10 +321,15 @@ class OllamaProvider(BaseProvider):
         self, tool_declarations: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """
-        Wrap JARVIS tool declarations into Ollama's expected format:
-        {"type": "function", "function": {name, description, parameters}}
+        Wrap JARVIS tool declarations into Ollama's expected format (cached by names).
         """
-        return [
+        if not tool_declarations:
+            return []
+        key = tuple(d["name"] for d in tool_declarations)
+        if self._cached_tools_key == key and len(self._cached_ollama_tools) == len(tool_declarations):
+            return self._cached_ollama_tools
+
+        wrapped = [
             {
                 "type": "function",
                 "function": {
@@ -312,6 +340,9 @@ class OllamaProvider(BaseProvider):
             }
             for decl in tool_declarations
         ]
+        self._cached_tools_key = key
+        self._cached_ollama_tools = wrapped
+        return wrapped
 
     def _parse_response(self, resp: dict[str, Any]) -> ModelResponse:
         """
@@ -383,6 +414,62 @@ class OllamaProvider(BaseProvider):
             raise OllamaConnectionError(
                 f"Ollama request timed out after {self._timeout}s."
             )
+
+    def _http_post_stream(
+        self,
+        path: str,
+        payload: dict,
+        stream_callback: Callable[[str], None],
+    ) -> ModelResponse:
+        """
+        Stream NDJSON chunks from /api/chat, forwarding text deltas when no
+        tool_calls are present, and assembling the final ModelResponse.
+        """
+        url = self._base_url + path
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        text_parts: list[str] = []
+        raw_tool_calls: list[dict[str, Any]] = []
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    msg = chunk.get("message", {})
+                    if msg.get("tool_calls"):
+                        raw_tool_calls.extend(msg["tool_calls"])
+                    delta = msg.get("content") or ""
+                    if delta:
+                        text_parts.append(delta)
+                        if not raw_tool_calls:
+                            try:
+                                stream_callback(delta)
+                            except Exception:
+                                pass
+        except urllib.error.URLError as e:
+            raise OllamaConnectionError(
+                f"Cannot reach Ollama at {self._base_url}: {e.reason}"
+            ) from e
+        except TimeoutError:
+            raise OllamaConnectionError(
+                f"Ollama request timed out after {self._timeout}s."
+            )
+
+        assembled = {
+            "message": {
+                "role": "assistant",
+                "content": "".join(text_parts),
+                "tool_calls": raw_tool_calls,
+            }
+        }
+        return self._parse_response(assembled)
 
     def _http_get(self, path: str) -> dict[str, Any]:
         url = self._base_url + path

@@ -87,7 +87,7 @@ class ToolDefinition:
         """
         Convert to the JSON-schema format expected by AI providers.
 
-        This format is passed to Gemini's function_declarations so the
+        This format is passed to the AI provider's tool definitions so the
         model knows which tools are available and what arguments they accept.
         """
         properties: dict[str, Any] = {}

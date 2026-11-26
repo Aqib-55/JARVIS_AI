@@ -44,12 +44,15 @@ class Settings:
         # ---- Ollama Configuration ----
         self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
         self.OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
-        self.OLLAMA_TIMEOUT: int = int(os.getenv("OLLAMA_TIMEOUT", "120"))
+        self.OLLAMA_TIMEOUT: int = int(os.getenv("OLLAMA_TIMEOUT", "180"))
+        self.OLLAMA_KEEP_ALIVE: str = os.getenv("OLLAMA_KEEP_ALIVE", "10m")
+        self.OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+        self.OLLAMA_STREAM: bool = os.getenv("OLLAMA_STREAM", "true").lower() in ("true", "1", "yes")
         self.OLLAMA_MAX_TOOL_CALLS: int = int(os.getenv("OLLAMA_MAX_TOOL_CALLS", "5"))
 
         # ---- Application Limits ----
         self.MAX_CONVERSATION_HISTORY: int = int(
-            os.getenv("MAX_CONVERSATION_HISTORY", "20")
+            os.getenv("MAX_CONVERSATION_HISTORY", "12")
         )
         self.MAX_TOOL_CALLS_PER_TASK: int = int(
             os.getenv("MAX_TOOL_CALLS_PER_TASK", "10")
@@ -69,7 +72,6 @@ class Settings:
         self.WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "cpu")
         self.WHISPER_COMPUTE_TYPE: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
         self.WHISPER_LANGUAGE: str = os.getenv("WHISPER_LANGUAGE", "auto")
-        self.STT_LANGUAGE: str = os.getenv("STT_LANGUAGE", "en-US")
         self.VOICE_SAMPLE_RATE: int = int(os.getenv("VOICE_SAMPLE_RATE", "16000"))
         self.VOICE_CHANNELS: int = int(os.getenv("VOICE_CHANNELS", "1"))
         self.VOICE_SILENCE_TIMEOUT_SECONDS: float = float(
@@ -82,7 +84,6 @@ class Settings:
         self.VOICE_MIN_SPEECH_SECONDS: float = float(
             os.getenv("VOICE_MIN_SPEECH_SECONDS", "0.3")
         )
-        self.ENERGY_THRESHOLD: int = int(os.getenv("ENERGY_THRESHOLD", "300"))
         raw_mic_idx = os.getenv("VOICE_MICROPHONE_INDEX", "").strip()
         self.VOICE_MICROPHONE_INDEX: int | None = int(raw_mic_idx) if raw_mic_idx else None
 
@@ -115,10 +116,8 @@ class Settings:
 
         # ---- Voice — TTS (Text-to-Speech) ----
         self.TTS_ENGINE: str = os.getenv("VOICE_TTS_PROVIDER", os.getenv("TTS_ENGINE", "piper"))
-        self.TTS_RATE: int = int(os.getenv("TTS_RATE", "175"))
         self.TTS_VOLUME: float = float(os.getenv("TTS_VOLUME", "1.0"))
         self.TTS_SPEED: float = float(os.getenv("TTS_SPEED", "1.0"))
-        self.TTS_VOICE: str = os.getenv("TTS_VOICE", "")
         self.VOICE_MODE: str = os.getenv("VOICE_MODE", "hands_free")
         self.VOICE_OUTPUT_ENABLED: bool = os.getenv("VOICE_OUTPUT_ENABLED", "true").lower() in ("true", "1", "yes")
 

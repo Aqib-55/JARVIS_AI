@@ -588,14 +588,28 @@ class JarvisCLI:
 
                 # Process via Agent under shared lock (serializes typed & spoken requests)
                 print(f"\n{_C.DIM}Thinking…{_C.RESET}")
+                streamed = {"started": False}
+
+                def _on_token(delta: str) -> None:
+                    if not streamed["started"]:
+                        print(f"\n{_C.BLUE}Jarvis:{_C.RESET} ", end="", flush=True)
+                        streamed["started"] = True
+                    print(delta, end="", flush=True)
+
                 with self._agent_lock:
-                    response = self._agent.process_message(user_input)
-                print(f"\n{_C.BLUE}Jarvis:{_C.RESET} {response}\n")
+                    cb = _on_token if settings.OLLAMA_STREAM else None
+                    response = self._agent.process_message(user_input, stream_callback=cb)
+
+                if streamed["started"]:
+                    print("\n")
+                else:
+                    print(f"\n{_C.BLUE}Jarvis:{_C.RESET} {response}\n")
 
                 # If voice is enabled and mode is not text-only, speak response
                 if self._voice and self._voice.mode != VoiceMode.TEXT and settings.VOICE_OUTPUT_ENABLED:
                     if self._hands_free is not None and self._hands_free.is_monitoring:
                         self._hands_free._speak_safe(response)
+                        self._hands_free._set_state(VoicePipelineState.IDLE_WAKE_LISTENING)
                     else:
                         self._voice.speak_response(response)
 

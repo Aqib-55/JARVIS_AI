@@ -53,10 +53,11 @@ JARVIS incorporates a hard fail-safe:
 
 ## 5. Credential & Privacy Protection
 
-1. **Environment Segregation**:
-   - API keys are read strictly from local `.env` using `os.getenv()`.
+1. **Environment Segregation & Zero Cloud AI Keys**:
+   - JARVIS runs 100% locally using Ollama (`127.0.0.1:11434`), openWakeWord, Faster-Whisper, Piper TTS, and SQLite. No cloud LLM API keys are required.
    - `.env`, `.env.*`, and `*.env` are in `.gitignore`.
-2. **Zero Log Leakage**:
-   - `providers/gemini.py` automatically scrubs and redacts the configured API key from all error tracebacks, model outputs, and log files.
+2. **Local-Only Mode Enforcement (`LOCAL_AI_ONLY=true`)**:
+   - `config/settings.py`, `providers/factory.py`, `voice/speech_to_text.py`, and `voice/text_to_speech.py` reject external LLM hosts, Gemini, or cloud STT/TTS services.
+   - Idle wake-word microphone audio remains strictly in memory and is never saved to disk or transmitted externally.
 3. **Database Privacy**:
    - Passwords, API keys, and sensitive tokens are never persisted to the SQLite memory database.

@@ -268,30 +268,30 @@ def summarize_text(text: str, max_points: int = 5) -> ToolResult:
 
 manage_notes_definition = ToolDefinition(
     name="manage_notes",
-    description="Create, list, read, or delete personal notes. Actions: 'create', 'list', 'read', 'delete'.",
+    description="Create, list, read, or delete personal notes.",
     parameters=[
         ToolParameter(
             name="action",
             type="string",
-            description="Action: 'create', 'list', 'read', or 'delete'.",
+            description="Note action.",
             enum=["create", "list", "read", "delete"],
         ),
         ToolParameter(
             name="title",
             type="string",
-            description="Title of the note (required for 'create').",
+            description="Note title (for create).",
             required=False,
         ),
         ToolParameter(
             name="content",
             type="string",
-            description="Body text content of the note (required for 'create').",
+            description="Note content (for create).",
             required=False,
         ),
         ToolParameter(
             name="note_id",
             type="integer",
-            description="ID of the note (for 'read' or 'delete').",
+            description="Note ID (for read/delete).",
             required=False,
         ),
     ],
@@ -301,30 +301,30 @@ manage_notes_definition = ToolDefinition(
 
 manage_reminders_definition = ToolDefinition(
     name="manage_reminders",
-    description="Add, list, complete, or delete reminders. Actions: 'add', 'list', 'complete', 'delete'.",
+    description="Add, list, complete, or delete reminders.",
     parameters=[
         ToolParameter(
             name="action",
             type="string",
-            description="Action: 'add', 'list', 'complete', or 'delete'.",
+            description="Reminder action.",
             enum=["add", "list", "complete", "delete"],
         ),
         ToolParameter(
             name="text",
             type="string",
-            description="Reminder message / reminder text.",
+            description="Reminder text.",
             required=False,
         ),
         ToolParameter(
             name="due_at",
             type="string",
-            description="Due date or time string (e.g. 'tomorrow at 3pm').",
+            description="Due time (e.g. 'tomorrow 3pm').",
             required=False,
         ),
         ToolParameter(
             name="reminder_id",
             type="integer",
-            description="ID of the reminder (for 'complete' or 'delete').",
+            description="Reminder ID (for complete/delete).",
             required=False,
         ),
     ],
@@ -334,31 +334,31 @@ manage_reminders_definition = ToolDefinition(
 
 manage_tasks_definition = ToolDefinition(
     name="manage_tasks",
-    description="Manage todo task items. Actions: 'add', 'list', 'complete', 'delete'.",
+    description="Manage todo tasks.",
     parameters=[
         ToolParameter(
             name="action",
             type="string",
-            description="Action: 'add', 'list', 'complete', or 'delete'.",
+            description="Task action.",
             enum=["add", "list", "complete", "delete"],
         ),
         ToolParameter(
             name="task_text",
             type="string",
-            description="Description of the task to add.",
+            description="Task description.",
             required=False,
         ),
         ToolParameter(
             name="priority",
             type="string",
-            description="Priority level: 'low', 'medium', or 'high'.",
+            description="Priority.",
             required=False,
             enum=["low", "medium", "high"],
         ),
         ToolParameter(
             name="task_id",
             type="integer",
-            description="Task ID (for 'complete' or 'delete').",
+            description="Task ID (for complete/delete).",
             required=False,
         ),
     ],
@@ -368,17 +368,17 @@ manage_tasks_definition = ToolDefinition(
 
 summarize_text_definition = ToolDefinition(
     name="summarize_text",
-    description="Summarize text into key bullet points.",
+    description="Summarize text into bullet points.",
     parameters=[
         ToolParameter(
             name="text",
             type="string",
-            description="Text content to summarize.",
+            description="Text to summarize.",
         ),
         ToolParameter(
             name="max_points",
             type="integer",
-            description="Maximum number of key points (default: 5).",
+            description="Max bullet points (default 5).",
             required=False,
         ),
     ],

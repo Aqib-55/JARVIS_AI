@@ -37,18 +37,16 @@ def _create_dummy_model_dir(base_dir: Path, include: tuple[str, ...] = (
 
 
 def _synthesize_wav_bytes(text: str) -> bytes:
-    """Generate local WAV audio bytes offline using pyttsx3."""
+    """Generate local WAV audio bytes offline using Piper TTS."""
     import os
     import tempfile
-    import pyttsx3
+    from voice.text_to_speech import get_tts_engine
 
     fd, tmp_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     try:
-        engine = pyttsx3.init()
-        engine.save_to_file(text, tmp_path)
-        engine.runAndWait()
-        engine.stop()
+        tts = get_tts_engine("piper")
+        tts.synthesize_to_wav(text, tmp_path)
         return Path(tmp_path).read_bytes()
     finally:
         if os.path.exists(tmp_path):
@@ -172,23 +170,28 @@ class TestLocalWhisperOfflineRuntime:
         assert lang_hi == "hi"
 
     def test_microphone_capture_workflow_preserved(self, monkeypatch):
+        import numpy as np
+        import soundfile as sf
+
         wav_bytes = _synthesize_wav_bytes("Open calculator please")
+        data, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        if sr != 16000:
+            n = int(round(len(data) * 16000 / sr))
+            data = np.interp(np.linspace(0, len(data) - 1, n), np.arange(len(data)), data).astype(np.float32)
 
-        mock_audio = MagicMock()
-        mock_audio.get_wav_data.return_value = wav_bytes
+        mock_mic = MagicMock()
+        mock_mic.start.return_value = True
+        mock_vad = MagicMock()
+        mock_vad.capture_utterance.return_value = data
 
-        mock_recognizer = MagicMock()
-        mock_recognizer.listen.return_value = mock_audio
-
-        mock_mic_cm = MagicMock()
-        mock_mic_cm.__enter__.return_value = MagicMock()
-        mock_mic_cm.__exit__.return_value = False
-
-        with patch("speech_recognition.Recognizer", return_value=mock_recognizer), \
-             patch("speech_recognition.Microphone", return_value=mock_mic_cm):
+        with patch("voice.wake_word.MicrophoneCapture", return_value=mock_mic), \
+             patch("voice.wake_word.SileroSpeechEndpointDetector", return_value=mock_vad):
             engine = FasterWhisperEngine(language="en", device="cpu", compute_type="int8")
             result = engine.listen_and_transcribe(timeout=3.0)
 
         assert len(result) > 0
         assert "calculator" in result.lower() or "open" in result.lower()
-        mock_audio.get_wav_data.assert_called_once_with(convert_rate=16000, convert_width=2)
+        mock_mic.start.assert_called_once()
+        mock_mic.stop.assert_called_once()

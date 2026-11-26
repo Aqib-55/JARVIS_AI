@@ -343,12 +343,12 @@ def delete_file(file_name: str, confirm: bool = False) -> ToolResult:
 
 list_files_definition = ToolDefinition(
     name="list_files",
-    description="List files and directories in a workspace folder. Defaults to workspace root.",
+    description="List workspace files and folders.",
     parameters=[
         ToolParameter(
             name="path",
             type="string",
-            description="Relative path within the workspace (default: root).",
+            description="Relative subfolder (optional).",
             required=False,
         ),
     ],
@@ -358,12 +358,12 @@ list_files_definition = ToolDefinition(
 
 create_folder_definition = ToolDefinition(
     name="create_folder",
-    description="Create a new folder in the JARVIS workspace.",
+    description="Create a folder in the workspace.",
     parameters=[
         ToolParameter(
             name="folder_name",
             type="string",
-            description="Name or relative path of the folder to create.",
+            description="Folder name/path.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_1_LOW_RISK,
@@ -372,17 +372,17 @@ create_folder_definition = ToolDefinition(
 
 create_file_definition = ToolDefinition(
     name="create_file",
-    description="Create a new text file in the JARVIS workspace.",
+    description="Create a text file in the workspace.",
     parameters=[
         ToolParameter(
             name="file_name",
             type="string",
-            description="Name or relative path of the file to create.",
+            description="File name/path.",
         ),
         ToolParameter(
             name="content",
             type="string",
-            description="Text content to write into the file.",
+            description="Text content.",
             required=False,
         ),
     ],
@@ -392,12 +392,12 @@ create_file_definition = ToolDefinition(
 
 read_file_definition = ToolDefinition(
     name="read_file",
-    description="Read the contents of a text file from the workspace.",
+    description="Read a workspace text file.",
     parameters=[
         ToolParameter(
             name="file_name",
             type="string",
-            description="Name or relative path of the file to read.",
+            description="File name/path.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_0_READ_ONLY,
@@ -406,17 +406,17 @@ read_file_definition = ToolDefinition(
 
 search_files_definition = ToolDefinition(
     name="search_files",
-    description="Search for files matching a name pattern in the workspace.",
+    description="Search workspace files by name pattern.",
     parameters=[
         ToolParameter(
             name="pattern",
             type="string",
-            description="Search pattern to match against file names.",
+            description="Filename pattern.",
         ),
         ToolParameter(
             name="path",
             type="string",
-            description="Directory to search in (default: workspace root).",
+            description="Subfolder (optional).",
             required=False,
         ),
     ],
@@ -426,12 +426,12 @@ search_files_definition = ToolDefinition(
 
 file_exists_definition = ToolDefinition(
     name="file_exists",
-    description="Check whether a file or folder exists in the workspace.",
+    description="Check if a workspace file or folder exists.",
     parameters=[
         ToolParameter(
             name="file_name",
             type="string",
-            description="Name or relative path to check.",
+            description="Name/path to check.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_0_READ_ONLY,
@@ -440,17 +440,17 @@ file_exists_definition = ToolDefinition(
 
 rename_file_definition = ToolDefinition(
     name="rename_file",
-    description="Rename a file or folder within the workspace.",
+    description="Rename a workspace file or folder.",
     parameters=[
         ToolParameter(
             name="old_path",
             type="string",
-            description="Current relative path of the item to rename.",
+            description="Current relative path.",
         ),
         ToolParameter(
             name="new_name",
             type="string",
-            description="New name for the item.",
+            description="New name.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_2_MODERATE_RISK,
@@ -459,17 +459,17 @@ rename_file_definition = ToolDefinition(
 
 copy_file_definition = ToolDefinition(
     name="copy_file",
-    description="Copy a file to a new destination within the workspace.",
+    description="Copy a workspace file.",
     parameters=[
         ToolParameter(
             name="source",
             type="string",
-            description="Relative path of the source file.",
+            description="Source path.",
         ),
         ToolParameter(
             name="destination",
             type="string",
-            description="Relative destination path for the copy.",
+            description="Destination path.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_1_LOW_RISK,
@@ -478,12 +478,12 @@ copy_file_definition = ToolDefinition(
 
 move_file_definition = ToolDefinition(
     name="move_file",
-    description="Move a file or directory to a new location within the workspace.",
+    description="Move a workspace file or folder.",
     parameters=[
         ToolParameter(
             name="source",
             type="string",
-            description="Relative path of the file or directory to move.",
+            description="Source path.",
         ),
         ToolParameter(
             name="destination",
@@ -497,17 +497,17 @@ move_file_definition = ToolDefinition(
 
 delete_file_definition = ToolDefinition(
     name="delete_file",
-    description="Delete a file or folder from the workspace. High-risk operation requiring explicit confirmation.",
+    description="Delete a workspace file/folder (high risk; needs confirm=True).",
     parameters=[
         ToolParameter(
             name="file_name",
             type="string",
-            description="Relative path of the file or folder to delete.",
+            description="Target path.",
         ),
         ToolParameter(
             name="confirm",
             type="boolean",
-            description="Must be True to confirm deletion.",
+            description="Confirm deletion.",
             required=False,
         ),
     ],

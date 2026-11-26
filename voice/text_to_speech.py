@@ -4,12 +4,10 @@ Text-to-Speech (TTS) module for JARVIS AI — Local Mode.
 Converts AI text responses into natural audible speech.
 
 Engines:
-  - PiperEngine     (default, local neural TTS — required in local-only mode)
-  - Pyttsx3Engine   (Windows SAPI5 offline fallback, available when LOCAL_AI_ONLY=false)
-  - EdgeTTSEngine   (online Microsoft Edge TTS — PROHIBITED in local-only mode)
-  - MockTTSEngine   (testing)
+  - PiperEngine   (default, local neural TTS — required in local-only mode)
+  - MockTTSEngine (testing)
 
-Cloud fallback is PROHIBITED in local-only mode.
+Cloud / legacy TTS fallbacks (Edge TTS, pyttsx3) have been removed.
 """
 
 import json
@@ -356,153 +354,6 @@ class PiperEngine(BaseTTSEngine):
 
 
 # ---------------------------------------------------------------------------
-#  Pyttsx3 — Windows SAPI5 (offline, non-Piper fallback)
-# ---------------------------------------------------------------------------
-
-class Pyttsx3Engine(BaseTTSEngine):
-    """
-    Offline Text-to-Speech engine utilizing Windows SAPI5 via pyttsx3.
-    Available when LOCAL_AI_ONLY=false. Not the default in local-AI mode.
-    """
-
-    def __init__(
-        self,
-        rate: int | None = None,
-        volume: float | None = None,
-        voice_id: str | None = None,
-    ) -> None:
-        self._rate = rate or settings.TTS_RATE
-        self._volume = volume or settings.TTS_VOLUME
-        self._voice_id = voice_id or settings.TTS_VOICE
-        self._is_speaking = False
-        self._stop_event = threading.Event()
-        self._lock = threading.Lock()
-
-    def is_available(self) -> bool:
-        try:
-            import pyttsx3
-            engine = pyttsx3.init()
-            return engine is not None
-        except Exception:
-            return False
-
-    def set_rate(self, rate: int) -> None:
-        self._rate = max(100, min(300, rate))
-
-    def set_volume(self, volume: float) -> None:
-        self._volume = max(0.0, min(1.0, volume))
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        self._is_speaking = False
-
-    def speak(
-        self,
-        text: str,
-        interrupt_event: threading.Event | None = None,
-        on_playback_start: Callable[[], None] | None = None,
-    ) -> bool:
-        cleaned = clean_text_for_speech(text)
-        if not cleaned:
-            return True
-
-        self._stop_event.clear()
-        self._is_speaking = True
-
-        sentence_pattern = re.compile(r'(?<=[.!?])\s+')
-        chunks = sentence_pattern.split(cleaned)
-        if not chunks:
-            chunks = [cleaned]
-
-        try:
-            import comtypes
-            comtypes.CoInitialize()
-        except Exception:
-            pass
-
-        try:
-            import pyttsx3
-            notified_start = False
-            with self._lock:
-                for chunk in chunks:
-                    if self._stop_event.is_set() or (interrupt_event and interrupt_event.is_set()):
-                        return False
-                    if not chunk.strip():
-                        continue
-                    try:
-                        engine = pyttsx3.init()
-                        engine.setProperty("rate", self._rate)
-                        engine.setProperty("volume", self._volume)
-                        if self._voice_id:
-                            engine.setProperty("voice", self._voice_id)
-                        if not notified_start and on_playback_start is not None:
-                            on_playback_start()
-                            notified_start = True
-                        engine.say(chunk.strip())
-                        engine.runAndWait()
-                        engine.stop()
-                    except Exception as e:
-                        logger.error("pyttsx3 chunk error: %s", e)
-            self._is_speaking = False
-            return True
-        except Exception as e:
-            logger.error("pyttsx3 speech error: %s", e)
-            self._is_speaking = False
-            return False
-        finally:
-            try:
-                import comtypes
-                comtypes.CoUninitialize()
-            except Exception:
-                pass
-
-
-# ---------------------------------------------------------------------------
-#  Edge TTS — PROHIBITED in local-only mode
-# ---------------------------------------------------------------------------
-
-class EdgeTTSEngine(BaseTTSEngine):
-    """
-    Online neural Text-to-Speech using Microsoft Edge TTS.
-    PROHIBITED when LOCAL_AI_ONLY=true.
-    """
-
-    def __init__(self, voice: str = "en-US-GuyNeural") -> None:
-        if settings.LOCAL_AI_ONLY:
-            raise RuntimeError(
-                "EdgeTTSEngine is prohibited when LOCAL_AI_ONLY=true. "
-                "Use PiperEngine for local speech synthesis."
-            )
-        self._voice = voice
-        self._stop_event = threading.Event()
-        self._is_speaking = False
-
-    def is_available(self) -> bool:
-        try:
-            import edge_tts  # noqa: F401
-            return True
-        except ImportError:
-            return False
-
-    def set_rate(self, rate: int) -> None:
-        pass
-
-    def set_volume(self, volume: float) -> None:
-        pass
-
-    def stop(self) -> None:
-        self._stop_event.set()
-
-    def speak(
-        self,
-        text: str,
-        interrupt_event: threading.Event | None = None,
-        on_playback_start: Callable[[], None] | None = None,
-    ) -> bool:
-        raise RuntimeError("EdgeTTSEngine not permitted in local-only mode.")
-
-
-# ---------------------------------------------------------------------------
 #  Mock TTS — Testing
 # ---------------------------------------------------------------------------
 
@@ -550,10 +401,9 @@ class MockTTSEngine(BaseTTSEngine):
 
 def get_tts_engine(name: str | None = None, **kwargs: Any) -> BaseTTSEngine:
     """
-    Factory function to retrieve or instantiate a TTS engine.
+    Factory function to retrieve or instantiate a local TTS engine.
 
-    In LOCAL_AI_ONLY=true mode, only 'piper' and 'mock' are permitted.
-    'edge_tts' and cloud engines are blocked.
+    Only 'piper' and 'mock' are supported. Cloud/legacy engines are blocked.
     """
     engine_name = (name or settings.TTS_ENGINE).lower().strip()
 
@@ -563,13 +413,9 @@ def get_tts_engine(name: str | None = None, **kwargs: Any) -> BaseTTSEngine:
     if engine_name == "piper":
         engine = PiperEngine(**kwargs)
         if not engine._package_installed():
-            if settings.LOCAL_AI_ONLY:
-                raise RuntimeError(
-                    "piper-tts is not installed and LOCAL_AI_ONLY=true. "
-                    "Install it with: pip install piper-tts"
-                )
-            logger.warning("piper-tts not available, falling back to pyttsx3.")
-            return Pyttsx3Engine()
+            raise RuntimeError(
+                "piper-tts is not installed. Install it with: pip install piper-tts"
+            )
         if not engine.is_available():
             logger.warning(
                 "Piper voice '%s' files missing in '%s'. "
@@ -580,19 +426,10 @@ def get_tts_engine(name: str | None = None, **kwargs: Any) -> BaseTTSEngine:
             )
         return engine
 
-    if engine_name in ("edge_tts", "edge-tts"):
-        # This constructor raises RuntimeError if LOCAL_AI_ONLY=true
-        return EdgeTTSEngine(**kwargs)
-
-    if engine_name == "pyttsx3":
-        return Pyttsx3Engine(**kwargs)
-
-    # Unknown engine
-    if settings.LOCAL_AI_ONLY:
+    if engine_name in ("edge_tts", "edge-tts", "pyttsx3"):
         raise RuntimeError(
-            f"Unknown TTS engine '{engine_name}' in LOCAL_AI_ONLY mode. "
-            "Set VOICE_TTS_PROVIDER=piper in .env."
+            f"TTS engine '{engine_name}' has been removed and is prohibited in LOCAL_AI_ONLY mode. "
+            "Use 'piper' for local speech synthesis."
         )
 
-    logger.warning("Unknown TTS engine '%s', defaulting to Piper.", engine_name)
-    return PiperEngine(**kwargs)
+    raise ValueError(f"Unknown TTS engine '{engine_name}'. Supported: piper, mock.")

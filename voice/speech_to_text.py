@@ -2,14 +2,12 @@
 Speech-to-Text (STT) module for JARVIS AI — Local Mode.
 
 Converts microphone audio into text using:
-  - Faster-Whisper (default, local CPU inference — required in local-only mode)
-  - SpeechRecognition (available only when LOCAL_AI_ONLY=false, explicit opt-in)
+  - Faster-Whisper (default, local CPU INT8 inference)
   - MockSTTEngine (testing)
 
-Cloud fallback is PROHIBITED in local-only mode.
+Cloud STT services (such as Google SpeechRecognition) are removed/prohibited.
 """
 
-import io
 import json
 import logging
 import os
@@ -79,11 +77,6 @@ class BaseSTTEngine(ABC):
     ) -> str:
         """
         Record audio from the microphone and transcribe it into text.
-
-        Args:
-            timeout: Maximum seconds to wait for speech to begin.
-            phrase_time_limit: Maximum duration of speech to capture.
-            cancel_event: Event to cancel active listening.
 
         Returns:
             Transcribed text string, or empty string if no speech or cancelled.
@@ -246,129 +239,45 @@ class FasterWhisperEngine(BaseSTTEngine):
         phrase_time_limit: float = 12.0,
         cancel_event: threading.Event | None = None,
     ) -> str:
-        # Validate package & local model files BEFORE opening the microphone
+        """
+        Capture a single spoken utterance via local sounddevice + Silero VAD
+        and transcribe it locally with Faster-Whisper (used for standalone /voice PTT).
+        """
         if not self._package_installed():
             raise RuntimeError(
                 "faster-whisper is not installed. Run: pip install faster-whisper"
             )
         self._validate_model_files()
 
-        import speech_recognition as sr
+        from voice.wake_word import MicrophoneCapture, SileroSpeechEndpointDetector
 
-        recognizer = sr.Recognizer()
-        recognizer.pause_threshold = 1.2
-        recognizer.dynamic_energy_threshold = True
+        mic = MicrophoneCapture()
+        if not mic.start():
+            logger.error("Microphone unavailable: %s", mic.last_error)
+            return ""
 
+        vad = SileroSpeechEndpointDetector(max_utterance_seconds=phrase_time_limit)
         try:
-            with sr.Microphone() as source:
-                logger.info("Calibrating for ambient noise...")
-                recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                if cancel_event and cancel_event.is_set():
-                    return ""
-                logger.info("Listening (timeout=%.1fs)...", timeout)
-                audio = recognizer.listen(
-                    source,
-                    timeout=timeout,
-                    phrase_time_limit=phrase_time_limit,
-                )
-                if cancel_event and cancel_event.is_set():
-                    return ""
-
-            wav_data = io.BytesIO(
-                audio.get_wav_data(convert_rate=16000, convert_width=2)
+            audio_f32 = vad.capture_utterance(
+                read_chunk_fn=mic.read_frame,
+                await_speech_timeout=timeout,
+                cancel_event=cancel_event,
             )
-            transcription, _ = self.transcribe_audio(wav_data)
-            return transcription
+        finally:
+            mic.stop()
 
-        except sr.WaitTimeoutError:
+        if audio_f32 is None or len(audio_f32) == 0:
             logger.info("No speech detected before timeout.")
             return ""
-        except (OSError, IOError) as e:
-            logger.error("Microphone hardware error: %s", e)
-            return ""
+
+        try:
+            transcription, _ = self.transcribe_audio(audio_f32)
+            return transcription
         except RuntimeError as e:
             logger.error("Faster-Whisper error: %s", e)
             raise
         except Exception as e:
             logger.error("Unexpected STT error: %s", e)
-            return ""
-
-
-class SpeechRecognitionEngine(BaseSTTEngine):
-    """
-    Cloud-based speech recognition via Google Speech Recognition API.
-
-    WARNING: This engine sends audio to Google servers.
-    It is PROHIBITED in LOCAL_AI_ONLY=true mode.
-    Available only when LOCAL_AI_ONLY=false and explicitly configured.
-    """
-
-    def __init__(
-        self,
-        language: str | None = None,
-        energy_threshold: int | None = None,
-        pause_threshold: float = 1.2,
-    ) -> None:
-        if settings.LOCAL_AI_ONLY:
-            raise RuntimeError(
-                "SpeechRecognitionEngine (Google STT) is prohibited when LOCAL_AI_ONLY=true. "
-                "Use FasterWhisperEngine for local speech recognition."
-            )
-        self.language = language or settings.STT_LANGUAGE
-        self.energy_threshold = energy_threshold or settings.ENERGY_THRESHOLD
-        self.pause_threshold = pause_threshold
-
-    def is_available(self) -> bool:
-        try:
-            import speech_recognition as sr
-            mics = sr.Microphone.list_microphone_names()
-            return len(mics) > 0
-        except Exception as e:
-            logger.warning("Microphone inspection failed: %s", e)
-            return False
-
-    def listen_and_transcribe(
-        self,
-        timeout: float = 5.0,
-        phrase_time_limit: float = 12.0,
-        cancel_event: threading.Event | None = None,
-    ) -> str:
-        import speech_recognition as sr
-
-        recognizer = sr.Recognizer()
-        recognizer.energy_threshold = self.energy_threshold
-        recognizer.pause_threshold = self.pause_threshold
-        recognizer.dynamic_energy_threshold = True
-
-        try:
-            with sr.Microphone() as source:
-                recognizer.adjust_for_ambient_noise(source, duration=0.6)
-                if cancel_event and cancel_event.is_set():
-                    return ""
-                audio = recognizer.listen(
-                    source,
-                    timeout=timeout,
-                    phrase_time_limit=phrase_time_limit,
-                )
-                if cancel_event and cancel_event.is_set():
-                    return ""
-
-            text = recognizer.recognize_google(audio, language=self.language)
-            logger.info("Cloud STT result: '%s'", text)
-            return text.strip()
-
-        except sr.WaitTimeoutError:
-            return ""
-        except sr.UnknownValueError:
-            return ""
-        except sr.RequestError as e:
-            logger.error("Cloud STT network error: %s", e)
-            return ""
-        except (OSError, IOError) as e:
-            logger.error("Microphone hardware error: %s", e)
-            return ""
-        except Exception as e:
-            logger.error("Unexpected cloud STT error: %s", e)
             return ""
 
 
@@ -404,10 +313,9 @@ class MockSTTEngine(BaseSTTEngine):
 
 def get_stt_engine(name: str | None = None, **kwargs: Any) -> BaseSTTEngine:
     """
-    Factory function to retrieve or instantiate an STT engine.
+    Factory function to retrieve or instantiate a local STT engine.
 
-    In LOCAL_AI_ONLY=true mode, only 'faster_whisper' and 'mock' are permitted.
-    Requesting 'speech_recognition' in local-only mode raises RuntimeError.
+    Only 'faster_whisper' and 'mock' are permitted. Cloud/legacy engines are blocked.
     """
     engine_name = (name or settings.STT_ENGINE).lower().strip()
 
@@ -433,15 +341,14 @@ def get_stt_engine(name: str | None = None, **kwargs: Any) -> BaseSTTEngine:
         return engine
 
     if engine_name in ("speech_recognition", "google"):
-        # This will raise RuntimeError if LOCAL_AI_ONLY=true
-        return SpeechRecognitionEngine(**kwargs)
+        raise RuntimeError(
+            "Cloud/legacy SpeechRecognition STT is removed and prohibited when LOCAL_AI_ONLY=true. "
+            "Use 'faster_whisper' for local speech recognition."
+        )
 
-    # Fallback
     if settings.LOCAL_AI_ONLY:
         raise RuntimeError(
             f"Unknown STT engine '{engine_name}' requested in LOCAL_AI_ONLY mode. "
             "Set VOICE_STT_PROVIDER=faster_whisper in .env."
         )
-    # Non-local-only fallback to Faster-Whisper if available
-    logger.warning("Unknown STT engine '%s', using FasterWhisperEngine.", engine_name)
-    return FasterWhisperEngine(**kwargs)
+    raise ValueError(f"Unsupported STT engine '{engine_name}'. Use 'faster_whisper'.")
