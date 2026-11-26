@@ -3,7 +3,7 @@ JARVIS Agent — the central intelligent task execution orchestrator.
 
 Coordinates:
 - Conversation manager (session sliding window)
-- AI provider (Gemini with function calling & retry logic)
+- AI provider (Ollama with native function calling)
 - Task planner (dependency-aware multi-step planning)
 - Task executor (permission validation & execution engine)
 - Tool registry (categorized tools across files, system, productivity, dev)
@@ -11,6 +11,7 @@ Coordinates:
 - Permission manager (4-tier security model & emergency stop)
 """
 
+import inspect
 import logging
 from typing import Any, Callable
 
@@ -34,24 +35,19 @@ from tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# Base system instruction defining agent behavior and safety rules
+# Base system instruction defining concise local-first behavior, architecture honesty, and safety rules
 SYSTEM_INSTRUCTION = """\
-You are JARVIS, a highly competent, production-minded personal AI task-execution assistant.
+You are JARVIS, a concise local-first AI task-execution assistant.
 
-Your capabilities:
-1. File Management: List, create, read, copy, move, rename, and delete files inside the workspace.
-2. System Automation: Check CPU, RAM, and Disk metrics; list processes; launch approved apps and websites.
-3. Productivity: Manage persistent notes, reminders, todo tasks, and summarize text.
-4. Development Assistance: Create verified Python files, read source code, analyze errors, run sandboxed scripts, and run approved commands.
+Architecture & Honesty Rules:
+- Your LLM runs locally via Ollama; speech input uses local Faster-Whisper and speech output uses local Piper (per Runtime System Diagnostics below). Never claim cloud AI or unexecuted external APIs.
+- Local tools (files, calculator, datetime, system info/apps, notes/reminders/tasks, dev tools) run offline; `open_website` requires internet for external URLs.
+- Answer offline/connectivity/engine questions strictly from `[Runtime System Diagnostics]` below.
 
-Operating Principles:
-- Understand user intent carefully. When crucial information or parameters are missing, ask for clarification.
-- Break complex instructions into clear, logical steps.
-- Explain the planned operation before executing moderate or high risk actions.
-- Never execute destructive actions (e.g. deleting files) without explicit confirmation.
-- If a tool fails, report the error clearly and offer a recovery strategy.
-- Never fabricate information — use tools to inspect real state.
-- All file operations must stay strictly within approved directories.
+Operating & Safety Rules:
+- Be concise and natural for voice and CLI. Ask clarification when parameters are missing.
+- Never execute destructive operations without confirmation; stay strictly inside approved workspace directories.
+- Never fabricate tool results; report errors clearly.
 """
 
 
@@ -91,8 +87,15 @@ class JarvisAgent:
 
         # Interactive approval callback
         self._approval_callback = approval_callback
+        self._voice_diagnostics_provider: Callable[[], dict[str, Any]] | None = None
 
         self._connected = False
+
+    def set_voice_diagnostics_provider(
+        self, provider: Callable[[], dict[str, Any]] | None
+    ) -> None:
+        """Attach a callback returning live STT/TTS diagnostics for prompt grounding."""
+        self._voice_diagnostics_provider = provider
 
     # ------------------------------------------------------------------
     #  Initialization & Shutdown
@@ -147,11 +150,15 @@ class JarvisAgent:
     #  Message Processing & Autonomous Multi-Step Execution
     # ------------------------------------------------------------------
 
-    def process_message(self, user_input: str) -> str:
+    def process_message(
+        self,
+        user_input: str,
+        stream_callback: Callable[[str], None] | None = None,
+    ) -> str:
         """
         Process a user instruction end-to-end.
-        Supports autonomous multi-step tool calls, context retrieval,
-        and safe error recovery.
+        Supports autonomous multi-step tool calls, optional streaming of final text,
+        context retrieval, and safe error recovery.
         """
         if not self._connected:
             return "⚠️ Not connected to AI provider. Please check your configuration."
@@ -171,18 +178,32 @@ class JarvisAgent:
             tool_declarations = self._registry.get_declarations()
 
             # First turn: model decides whether to respond directly or request tools
-            response = self._provider.generate_with_tools(
-                messages=messages,
-                tool_declarations=tool_declarations,
-                system_instruction=dynamic_instruction,
-            )
+            gwt_params = inspect.signature(self._provider.generate_with_tools).parameters
+            if stream_callback is not None and "stream_callback" in gwt_params:
+                response = self._provider.generate_with_tools(
+                    messages=messages,
+                    tool_declarations=tool_declarations,
+                    system_instruction=dynamic_instruction,
+                    stream_callback=stream_callback,
+                )
+            else:
+                response = self._provider.generate_with_tools(
+                    messages=messages,
+                    tool_declarations=tool_declarations,
+                    system_instruction=dynamic_instruction,
+                )
 
             if response.is_error:
                 return self._store_and_return(f"⚠️ {response.error}")
 
             # If the model requested tool execution, enter the autonomous execution loop
             if response.has_function_calls:
-                return self._autonomous_execution_loop(user_input, response, dynamic_instruction)
+                return self._autonomous_execution_loop(
+                    user_input,
+                    response,
+                    dynamic_instruction,
+                    stream_callback=stream_callback,
+                )
 
             # Plain text response
             reply = response.text or "I'm not sure how to respond to that."
@@ -197,10 +218,11 @@ class JarvisAgent:
         user_request: str,
         initial_response: ModelResponse,
         system_instruction: str,
+        stream_callback: Callable[[str], None] | None = None,
     ) -> str:
         """
         Executes multi-step tool calls autonomously.
-        Runs tool calls -> feeds results back to Gemini -> if Gemini requests further
+        Runs tool calls -> feeds results back to Ollama -> if Ollama requests further
         tools (e.g. step 2 after inspecting results), repeats until complete or max turns reached.
         """
         current_response = initial_response
@@ -296,7 +318,7 @@ class JarvisAgent:
                 reply = final_model_resp.text or f"❌ Task halted at step '{plan.steps[-1].tool_name}': {plan.error}"
                 return self._store_and_return(reply)
 
-            # 5. Build function responses for Gemini
+            # 5. Build function responses for Ollama
             func_responses = []
             for fc, step in zip(function_calls, plan.steps):
                 data = step.result if isinstance(step.result, dict) else {"result": step.result}
@@ -305,14 +327,25 @@ class JarvisAgent:
             messages = self._conversation.get_messages()
             tool_declarations = self._registry.get_declarations()
 
-            # 6. Send results back to Gemini
-            current_response = self._provider.send_function_results(
-                messages=messages,
-                function_calls=function_calls,
-                function_responses=func_responses,
-                tool_declarations=tool_declarations,
-                system_instruction=system_instruction,
-            )
+            # 6. Send results back to Ollama
+            sfr_params = inspect.signature(self._provider.send_function_results).parameters
+            if stream_callback is not None and "stream_callback" in sfr_params:
+                current_response = self._provider.send_function_results(
+                    messages=messages,
+                    function_calls=function_calls,
+                    function_responses=func_responses,
+                    tool_declarations=tool_declarations,
+                    system_instruction=system_instruction,
+                    stream_callback=stream_callback,
+                )
+            else:
+                current_response = self._provider.send_function_results(
+                    messages=messages,
+                    function_calls=function_calls,
+                    function_responses=func_responses,
+                    tool_declarations=tool_declarations,
+                    system_instruction=system_instruction,
+                )
 
             if current_response.is_error:
                 self._task_history.update_task(
@@ -337,12 +370,37 @@ class JarvisAgent:
 
         return self._store_and_return(final_reply)
 
+    def _get_runtime_diagnostics_block(self) -> str:
+        """Build a concise live diagnostic block grounded in actual application state."""
+        status = self.get_status()
+        voice_diag: dict[str, Any] = {}
+        if self._voice_diagnostics_provider is not None:
+            try:
+                voice_diag = self._voice_diagnostics_provider() or {}
+            except Exception as e:
+                logger.warning("Voice diagnostics lookup failed: %s", e)
+
+        stt_name = voice_diag.get("stt_engine", settings.STT_ENGINE)
+        stt_avail = voice_diag.get("stt_available", False)
+        tts_name = voice_diag.get("tts_engine", settings.TTS_ENGINE)
+        tts_avail = voice_diag.get("tts_available", False)
+        voice_mode = voice_diag.get("mode", "disabled" if not voice_diag else settings.VOICE_MODE)
+
+        lines = [
+            "[Runtime System Diagnostics]",
+            f"Provider: {status['provider']} ({settings.OLLAMA_BASE_URL}) | Model: {status['model']} | Local Only: {settings.LOCAL_AI_ONLY} | Connected: {status['connected']}",
+            f"Memory: SQLite ({status['memory']}) | Tools: {status['tools']} (local except open_website)",
+            f"STT: {stt_name} (available: {stt_avail}) | TTS: {tts_name} (available: {tts_avail}, voice: {settings.PIPER_VOICE}) | Mode: {voice_mode}",
+        ]
+        return "\n".join(lines)
+
     def _build_dynamic_instruction(self, user_input: str) -> str:
-        """Augment standard system instructions with relevant user context."""
+        """Augment system instructions with live runtime diagnostics and user memory."""
+        diagnostics = self._get_runtime_diagnostics_block()
         context = self._memory_manager.get_relevant_context(user_input)
         if context:
-            return f"{SYSTEM_INSTRUCTION}\n\n[Retrieved Context from Memory]:\n{context}"
-        return SYSTEM_INSTRUCTION
+            return f"{SYSTEM_INSTRUCTION}\n\n{diagnostics}\n\n[Retrieved Context from Memory]:\n{context}"
+        return f"{SYSTEM_INSTRUCTION}\n\n{diagnostics}"
 
     def _store_and_return(self, reply: str) -> str:
         """Store the assistant response in active conversation and history."""

@@ -181,7 +181,7 @@ def open_website(url: str) -> ToolResult:
 
 get_system_info_definition = ToolDefinition(
     name="get_system_info",
-    description="Get system specifications including OS, processor, architecture, and Python runtime info.",
+    description="Get OS, CPU, architecture, and Python runtime info.",
     parameters=[],
     permission_level=PermissionLevel.LEVEL_0_READ_ONLY,
     category=ToolCategory.SYSTEM_AUTOMATION,
@@ -189,7 +189,7 @@ get_system_info_definition = ToolDefinition(
 
 get_resource_usage_definition = ToolDefinition(
     name="get_resource_usage",
-    description="Check real-time CPU, RAM, and Disk storage utilization on the computer.",
+    description="Get live CPU, RAM, and Disk usage.",
     parameters=[],
     permission_level=PermissionLevel.LEVEL_0_READ_ONLY,
     category=ToolCategory.SYSTEM_AUTOMATION,
@@ -197,18 +197,18 @@ get_resource_usage_definition = ToolDefinition(
 
 list_processes_definition = ToolDefinition(
     name="list_processes",
-    description="List currently running processes sorted by RAM or CPU consumption.",
+    description="List running processes sorted by RAM or CPU.",
     parameters=[
         ToolParameter(
             name="limit",
             type="integer",
-            description="Number of top processes to return (default: 15, max: 50).",
+            description="Max processes to return (default 15, max 50).",
             required=False,
         ),
         ToolParameter(
             name="sort_by",
             type="string",
-            description="Sort metric: 'memory' or 'cpu'.",
+            description="Sort metric.",
             required=False,
             enum=["memory", "cpu"],
         ),
@@ -219,12 +219,12 @@ list_processes_definition = ToolDefinition(
 
 open_application_definition = ToolDefinition(
     name="open_application",
-    description="Open an approved application (e.g., Chrome, Notepad, Calculator, VS Code, Edge).",
+    description="Open an approved local app (Chrome, Notepad, Calculator, VS Code, Edge).",
     parameters=[
         ToolParameter(
             name="app_name",
             type="string",
-            description="Name of the application to open (e.g. 'chrome', 'notepad', 'calculator', 'vs code').",
+            description="Application name.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_2_MODERATE_RISK,
@@ -233,12 +233,12 @@ open_application_definition = ToolDefinition(
 
 open_website_definition = ToolDefinition(
     name="open_website",
-    description="Open a website URL in the default web browser.",
+    description="Open a URL in the default browser (requires internet).",
     parameters=[
         ToolParameter(
             name="url",
             type="string",
-            description="Website address or URL to open (e.g. 'google.com', 'https://github.com').",
+            description="Website URL.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_1_LOW_RISK,

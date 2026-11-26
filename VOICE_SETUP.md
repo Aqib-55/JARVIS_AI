@@ -1,27 +1,25 @@
-# JARVIS AI — Voice Integration & Setup Guide (Phase 3)
+# JARVIS AI — Voice Integration & Setup Guide
 
-This guide explains how to configure, test, and troubleshoot the microphone speech-to-text (STT) and speaker text-to-speech (TTS) subsystems on Windows.
+This guide explains how to configure, test, and troubleshoot the local microphone wake-word, speech-to-text (STT), and speaker text-to-speech (TTS) subsystems on Windows.
+
+> See [HANDS_FREE_VOICE_SETUP.md](HANDS_FREE_VOICE_SETUP.md) for full hands-free `"Hey JARVIS"` wake-word details and model licensing.
 
 ---
 
-## 1. Required Packages & Installation
+## 1. Required Packages & Local Models
 
-All required audio dependencies are pre-configured in `requirements.txt`:
+All required audio dependencies are listed in `requirements.txt`:
 
 ```powershell
-# Activate your virtual environment
-.\.venv\Scripts\Activate.ps1
-
-# Install audio dependencies
-pip install pyttsx3 SpeechRecognition PyAudio sounddevice numpy edge-tts
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe setup_local_models.py
 ```
 
 ### Dependency Overview:
-- `pyttsx3`: Offline Windows SAPI5 text-to-speech (low latency, zero internet requirement).
-- `SpeechRecognition`: Audio capture, energy threshold adaptation, and ambient noise calibration.
-- `PyAudio`: Direct PortAudio bindings for microphone streaming on Windows.
-- `sounddevice` & `numpy`: Audio array handling and stream buffer inspection.
-- `edge-tts`: Optional high-fidelity neural voices.
+- `openwakeword` (ONNX Runtime CPU): Local `"Hey JARVIS"` wake-word detection.
+- `faster-whisper`: Local CPU INT8 neural speech recognition (includes Silero VAD v6 ONNX).
+- `piper-tts`: Local neural text-to-speech (`en_GB-alan-medium`).
+- `sounddevice`, `soundfile`, `numpy`: Single-stream 16 kHz mono PCM microphone capture and WAV playback.
 
 ---
 
@@ -30,18 +28,26 @@ pip install pyttsx3 SpeechRecognition PyAudio sounddevice numpy edge-tts
 Voice settings are controlled via environment variables in `.env` (or configured via `config/settings.py`):
 
 ```env
-# ------ Voice Subsystem Settings ------
+# ------ Voice Subsystem Settings (Local Only) ------
 VOICE_ENABLED=true
-STT_ENGINE=speech_recognition     # Options: speech_recognition, faster_whisper, mock
-TTS_ENGINE=pyttsx3                # Options: pyttsx3, edge_tts, mock
-STT_LANGUAGE=en-US                # Primary spoken language
-TTS_LANGUAGE=en
-TTS_RATE=175                      # Speed in words per minute (100 - 300)
-TTS_VOLUME=0.9                    # Volume from 0.0 to 1.0
-TTS_VOICE=                        # Optional specific voice ID (e.g. David, Zira)
-VOICE_MODE=push_to_talk           # Options: push_to_talk, continuous, text
-SILENCE_TIMEOUT=2.0               # Silence detection threshold in seconds
-ENERGY_THRESHOLD=300              # Microphone noise sensitivity
+VOICE_INPUT_ENABLED=true
+VOICE_OUTPUT_ENABLED=true
+VOICE_STT_PROVIDER=faster_whisper
+VOICE_TTS_PROVIDER=piper
+WHISPER_MODEL=base
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+WHISPER_LANGUAGE=auto
+PIPER_MODEL_PATH=models/tts
+PIPER_VOICE=en_GB-alan-medium
+TTS_VOLUME=1.0
+TTS_SPEED=1.0
+WAKE_WORD_ENABLED=true
+WAKE_WORD_PHRASE=hey jarvis
+WAKE_WORD_THRESHOLD=0.5
+VOICE_MODE=hands_free
+VOICE_SILENCE_TIMEOUT_SECONDS=1.0
+CONVERSATION_TIMEOUT_SECONDS=25
 ```
 
 ---
@@ -95,13 +101,12 @@ ENERGY_THRESHOLD=300              # Microphone noise sensitivity
 
 ## 6. Troubleshooting
 
-1. **`Microphone error: [Errno -9996] Invalid device`**:
+1. **`Microphone unavailable` / invalid input device**:
    - Verify that your microphone is plugged in and recognized under Windows Sound Settings.
-   - Run `python -c "import speech_recognition as sr; print(sr.Microphone.list_microphone_names())"` to verify detected hardware devices.
+   - Run `.\.venv\Scripts\python.exe -c "from voice.wake_word import list_input_devices; print(list_input_devices())"` to inspect detected input devices and set `VOICE_MICROPHONE_INDEX` if needed.
 
-2. **No speech recognized (`Audio received but speech could not be understood`)**:
-   - Speak closer to the microphone.
-   - Adjust `ENERGY_THRESHOLD=200` in `.env` if your microphone volume is quiet.
+2. **Missing local STT / TTS / Wake-Word files**:
+   - Run `.\.venv\Scripts\python.exe setup_local_models.py` once to download missing local models into `models/`.
 
-3. **`pyttsx3 voice engine error`**:
-   - Ensure the Windows SAPI5 service is active. Windows 10/11 includes `Microsoft David` and `Microsoft Zira` by default.
+3. **Run in-app voice diagnostics**:
+   - Use `/voice status` and `/voice test` inside the CLI.

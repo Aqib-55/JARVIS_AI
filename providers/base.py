@@ -1,7 +1,7 @@
 """
 Abstract base class for AI model providers.
 
-All providers (Gemini, OpenAI, etc.) must implement this interface.
+All providers (Ollama, etc.) must implement this interface.
 This ensures the rest of the application is provider-independent.
 """
 
@@ -111,10 +111,10 @@ class BaseProvider(ABC):
 
     @abstractmethod
     def get_provider_name(self) -> str:
-        """Return the name of this provider (e.g. 'gemini')."""
+        """Return the name of this provider (e.g. 'ollama')."""
         ...
 
     @abstractmethod
     def get_model_name(self) -> str:
-        """Return the model identifier being used (e.g. 'gemini-2.5-flash')."""
+        """Return the model identifier being used (e.g. 'qwen3.5:4b')."""
         ...

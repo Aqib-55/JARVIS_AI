@@ -276,17 +276,17 @@ def execute_approved_command(command: str) -> ToolResult:
 
 create_python_file_definition = ToolDefinition(
     name="create_python_file",
-    description="Create a new Python file in the workspace with automatic syntax validation.",
+    description="Create a syntax-checked Python file in the workspace.",
     parameters=[
         ToolParameter(
             name="file_name",
             type="string",
-            description="Name of the Python file (e.g. 'script.py').",
+            description="Filename (e.g. 'script.py').",
         ),
         ToolParameter(
             name="code",
             type="string",
-            description="Python source code to write.",
+            description="Python code.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_1_LOW_RISK,
@@ -295,23 +295,23 @@ create_python_file_definition = ToolDefinition(
 
 read_code_file_definition = ToolDefinition(
     name="read_code_file",
-    description="Read source code with line numbers from the workspace or project directory.",
+    description="Read source code with line numbers.",
     parameters=[
         ToolParameter(
             name="file_name",
             type="string",
-            description="Path of the source code file.",
+            description="File path.",
         ),
         ToolParameter(
             name="start_line",
             type="integer",
-            description="First line to display (default: 1).",
+            description="Start line (default 1).",
             required=False,
         ),
         ToolParameter(
             name="end_line",
             type="integer",
-            description="Last line to display (default: 200).",
+            description="End line (default 200).",
             required=False,
         ),
     ],
@@ -321,17 +321,17 @@ read_code_file_definition = ToolDefinition(
 
 explain_code_error_definition = ToolDefinition(
     name="explain_code_error",
-    description="Analyze a Python code snippet and error message for diagnosis.",
+    description="Diagnose a Python snippet and error traceback.",
     parameters=[
         ToolParameter(
             name="code",
             type="string",
-            description="Python code that caused the error.",
+            description="Python code.",
         ),
         ToolParameter(
             name="error_message",
             type="string",
-            description="The traceback or error message.",
+            description="Traceback or error.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_0_READ_ONLY,
@@ -340,17 +340,17 @@ explain_code_error_definition = ToolDefinition(
 
 run_python_script_definition = ToolDefinition(
     name="run_python_script",
-    description="Run an approved Python script from the workspace with timeout protection.",
+    description="Run a workspace Python script with timeout.",
     parameters=[
         ToolParameter(
             name="script_name",
             type="string",
-            description="Name of the script inside the workspace to execute.",
+            description="Script path.",
         ),
         ToolParameter(
             name="timeout_seconds",
             type="integer",
-            description="Maximum execution seconds (default: 15).",
+            description="Timeout seconds (default 15).",
             required=False,
         ),
     ],
@@ -360,12 +360,12 @@ run_python_script_definition = ToolDefinition(
 
 execute_approved_command_definition = ToolDefinition(
     name="execute_approved_command",
-    description="Execute a safe, whitelisted terminal command (e.g. 'git status', 'pip list', 'python --version').",
+    description="Run a whitelisted terminal command (e.g. git status, pip list).",
     parameters=[
         ToolParameter(
             name="command",
             type="string",
-            description="Whitelisted command to execute.",
+            description="Whitelisted command.",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_2_MODERATE_RISK,

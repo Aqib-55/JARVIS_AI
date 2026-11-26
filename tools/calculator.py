@@ -118,19 +118,12 @@ def calculate(expression: str) -> ToolResult:
 # ---- Tool definition for the registry ----
 definition = ToolDefinition(
     name="calculator",
-    description=(
-        "Perform mathematical calculations. Supports addition, subtraction, "
-        "multiplication, division, modulo, exponentiation, and parentheses. "
-        "Example expressions: '2 + 3', '100 / 4', '2 ** 10', '(5 + 3) * 2'."
-    ),
+    description="Evaluate a mathematical expression (+, -, *, /, //, %, **, parentheses).",
     parameters=[
         ToolParameter(
             name="expression",
             type="string",
-            description=(
-                "The mathematical expression to evaluate "
-                "(e.g. '1500 + 2500 + 3000')."
-            ),
+            description="Math expression (e.g. '2 + 3 * 4').",
         ),
     ],
     permission_level=PermissionLevel.LEVEL_0_READ_ONLY,

@@ -58,6 +58,7 @@ logs/*
 models/
 *.gguf
 *.safetensors
+*.onnx
 
 # Voice recordings
 recordings/
