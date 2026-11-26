@@ -95,8 +95,8 @@ macos.permissions =
 # mode of using nuitka. accepts standalone or onefile. default = standalone
 mode = standalone
 
-# specify any extra nuitka arguments (Windows MSVC x64, package data for audio/ONNX, static icon & .env.example template)
-extra_args = --quiet --noinclude-qt-translations --msvc=latest --nofollow-import-to=pytest --nofollow-import-to=tests --include-data-file=desktop/resources/icons/jarvis.ico=desktop/resources/icons/jarvis.ico --include-data-file=.env.example=.env.example --include-package-data=sounddevice --include-package-data=faster_whisper --include-package-data=piper --include-package-data=openwakeword --include-package-data=onnxruntime
+# specify any extra nuitka arguments (Windows MSVC x64, package runtime data, static icon & .env.example template)
+extra_args = --quiet --assume-yes-for-downloads --noinclude-qt-translations --msvc=latest --nofollow-import-to=pytest --nofollow-import-to=tests --include-data-files=desktop/resources/icons/jarvis.ico=desktop/resources/icons/jarvis.ico --include-data-files=.env.example=.env.example --include-package-data=_sounddevice_data --include-package-data=faster_whisper:assets/* --include-package-data=piper:espeak-ng-data/*
 
 [buildozer]
 
