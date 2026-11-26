@@ -82,6 +82,7 @@ class HandsFreeConversationManager:
         conversation_timeout_seconds: float | None = None,
         on_output: Callable[[str], None] | None = None,
         on_state_change: Callable[[VoicePipelineState], None] | None = None,
+        on_ui_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._agent = agent
         self._voice = voice_controller
@@ -98,6 +99,7 @@ class HandsFreeConversationManager:
         )
         self._on_output = on_output or print
         self._on_state_change = on_state_change
+        self._on_ui_event = on_ui_event
 
         self._state = VoicePipelineState.DISABLED
         self._state_lock = threading.Lock()
@@ -145,6 +147,13 @@ class HandsFreeConversationManager:
             self._on_output(message)
         except Exception:
             pass
+
+    def _emit_ui_event(self, payload: dict[str, Any]) -> None:
+        if self._on_ui_event is not None:
+            try:
+                self._on_ui_event(payload)
+            except Exception as e:
+                logger.debug("UI event callback error: %s", e)
 
     # ------------------------------------------------------------------
     #  Startup, Enable & Disable (/voice on, /voice off)
@@ -322,6 +331,7 @@ class HandsFreeConversationManager:
                 self._set_state(VoicePipelineState.WAKE_DETECTED)
                 self._emit("\n[WAKE] Hey JARVIS detected.")
                 self._emit("[JARVIS] Yes, I'm listening.")
+                self._emit_ui_event({"type": "wake_detected", "ack": "Yes, I'm listening."})
                 self._speak_safe("Yes, I'm listening.")
                 if self._stop_event.is_set():
                     return
@@ -381,10 +391,12 @@ class HandsFreeConversationManager:
             return True
 
         self._emit(f"\n[VOICE] Recognized: {transcript}")
+        self._emit_ui_event({"type": "transcription", "text": transcript})
 
         if self._is_goodbye(transcript):
             goodbye_reply = "Certainly. I'll be here when you need me."
             self._emit(f"Jarvis: {goodbye_reply}")
+            self._emit_ui_event({"type": "assistant_reply", "text": goodbye_reply})
             self._speak_safe(goodbye_reply)
             return False
 
@@ -392,6 +404,7 @@ class HandsFreeConversationManager:
         is_meta, meta_reply = self._voice._handle_voice_command(transcript)
         if is_meta:
             self._emit(f"Jarvis: {meta_reply}")
+            self._emit_ui_event({"type": "assistant_reply", "text": meta_reply})
             if self._voice.mode == VoiceMode.TEXT:
                 self._speak_safe(meta_reply)
                 return False
@@ -405,6 +418,7 @@ class HandsFreeConversationManager:
             reply = self._agent.process_message(transcript)
 
         self._emit(f"\nJarvis: {reply}\n")
+        self._emit_ui_event({"type": "assistant_reply", "text": reply})
         self._speak_safe(reply)
         return True
 

@@ -88,6 +88,7 @@ class JarvisAgent:
         # Interactive approval callback
         self._approval_callback = approval_callback
         self._voice_diagnostics_provider: Callable[[], dict[str, Any]] | None = None
+        self._tool_event_callback: Callable[[dict[str, Any]], None] | None = None
 
         self._connected = False
 
@@ -96,6 +97,19 @@ class JarvisAgent:
     ) -> None:
         """Attach a callback returning live STT/TTS diagnostics for prompt grounding."""
         self._voice_diagnostics_provider = provider
+
+    def set_tool_event_callback(
+        self, callback: Callable[[dict[str, Any]], None] | None
+    ) -> None:
+        """Attach an optional callback for live tool execution status updates."""
+        self._tool_event_callback = callback
+
+    def _emit_tool_event(self, event: dict[str, Any]) -> None:
+        if self._tool_event_callback is not None:
+            try:
+                self._tool_event_callback(event)
+            except Exception as e:
+                logger.debug("Tool event callback error: %s", e)
 
     # ------------------------------------------------------------------
     #  Initialization & Shutdown
@@ -261,9 +275,25 @@ class JarvisAgent:
             )
 
             # 2. Execute plan
+            self._emit_tool_event(
+                {"event": "tool_started", "tools": [fc.name for fc in function_calls]}
+            )
             plan = self._executor.execute_plan(
                 plan=plan,
                 approval_callback=self._approval_callback,
+            )
+            self._emit_tool_event(
+                {
+                    "event": "tool_completed",
+                    "steps": [
+                        {
+                            "name": s.tool_name,
+                            "status": s.status.value,
+                            "error": s.error,
+                        }
+                        for s in plan.steps
+                    ],
+                }
             )
 
             # 3. Persist steps and record tool metrics

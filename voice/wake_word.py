@@ -445,6 +445,7 @@ class MicrophoneCapture:
         channels: int = TARGET_CHANNELS,
         blocksize: int = VAD_CHUNK_SAMPLES,
         max_queue_frames: int = 200,
+        on_audio_level: Callable[[float], None] | None = None,
     ) -> None:
         self.device_index = (
             device_index if device_index is not None else settings.VOICE_MICROPHONE_INDEX
@@ -458,6 +459,8 @@ class MicrophoneCapture:
         self._active = False
         self.last_error: str = ""
         self.selected_device_name: str = ""
+        self._on_audio_level = on_audio_level
+        self._last_level_emit: float = 0.0
 
     @property
     def is_active(self) -> bool:
@@ -484,10 +487,24 @@ class MicrophoneCapture:
         except Exception as e:
             return False, f"Microphone check failed: {e}"
 
+    def set_audio_level_callback(self, callback: Callable[[float], None] | None) -> None:
+        """Attach an optional throttled callback receiving normalized [0..1] mic RMS."""
+        self._on_audio_level = callback
+
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:
         if status:
             logger.debug("Audio input status flag: %s", status)
         pcm = np.asarray(indata[:, 0] if indata.ndim > 1 else indata, dtype=np.int16).copy()
+        if self._on_audio_level is not None:
+            now = time.monotonic()
+            if (now - self._last_level_emit) >= 0.06:
+                self._last_level_emit = now
+                rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2)))
+                level = min(1.0, rms / 3500.0)
+                try:
+                    self._on_audio_level(level)
+                except Exception:
+                    pass
         try:
             self._queue.put_nowait(pcm)
         except queue.Full:

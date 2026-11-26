@@ -65,5 +65,8 @@ recordings/
 *.wav
 *.mp3
 
+# Packaging output directories (never commit compiled binaries or models)
+deployment/
+
 # Generated voice samples
 artifacts/voice_samples/

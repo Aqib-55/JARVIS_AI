@@ -3,6 +3,9 @@ python-dotenv>=1.0.0
 pydantic>=2.0.0
 psutil>=7.0.0
 
+# Native Windows Desktop UI — PySide6 (LGPLv3 / Qt 6)
+PySide6>=6.8.0
+
 # Local AI inference — Ollama HTTP client uses stdlib urllib
 
 # Local Speech Recognition — Faster-Whisper (includes Silero VAD v6 ONNX)
