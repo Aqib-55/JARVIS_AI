@@ -38,14 +38,17 @@ JARVIS AI
 
 ```text
 D:\JARVIS_AI\
-├── main.py                          # Application entry point
-├── requirements.txt                 # Local AI, voice, and test dependencies
+├── main.py                          # CLI entry point
+├── desktop_main.py                  # Native Windows Desktop GUI entry point (PySide6 / Qt 6)
+├── pysidedeploy.spec                # PySide6 standalone Windows packaging configuration
+├── requirements.txt                 # Local AI, desktop UI, voice, and test dependencies
 ├── setup_local_models.py            # One-time setup for Whisper, Piper, and openWakeWord models
 ├── pytest.ini                       # Pytest configuration
 ├── .env                             # Local runtime configuration (never committed)
 ├── .env.example                     # Configuration template
-├── .gitignore                       # Excludes .env, .venv/, models/, *.onnx, *.db, logs/
+├── .gitignore                       # Excludes .env, .venv/, models/, *.onnx, *.db, logs/, dist/, deployment/
 ├── README.md                        # System documentation
+├── DESKTOP_APP_SETUP.md             # PySide6 native Windows desktop setup, usage & packaging guide
 ├── LOCAL_AI_SETUP.md                # Local Ollama AI & model setup guide
 ├── HANDS_FREE_VOICE_SETUP.md        # Hands-free wake-word, mic, privacy & licensing guide
 ├── ARCHITECTURE.md                  # Detailed core architectural overview
@@ -54,6 +57,14 @@ D:\JARVIS_AI\
 ├── TESTING.md                       # Test suite guide & coverage
 ├── VOICE_SETUP.md                   # Voice configuration & troubleshooting guide
 ├── VOICE_ARCHITECTURE.md            # Voice pipeline & state machine documentation
+├── desktop/                         # PySide6 (Qt 6) native Windows frontend package
+│   ├── app.py                       # QApplication lifecycle, logging & single-instance lock
+│   ├── main_window.py               # Main responsive desktop window & signal wiring
+│   ├── theme.py                     # Dark futuristic QSS styling & palette tokens
+│   ├── components/                  # Sidebar, Topbar, StatusCard, ChatMessage, MessageInput, VoiceVisualizer, ConfirmationDialog
+│   ├── pages/                       # Overview, Chat, Tools, Memory, and Settings views
+│   ├── services/                    # BackendAdapter, QThreadPool workers & GuiApprovalBridge
+│   └── resources/icons/             # Pure-Qt emblem renderer & Windows jarvis.ico generator
 ├── config/
 │   ├── __init__.py
 │   └── settings.py                  # Validated settings via python-dotenv & os.getenv
@@ -146,10 +157,19 @@ VOICE_MODE=hands_free
 ```
 
 ### 4. Launch JARVIS
+
+**Native Windows Desktop App (PySide6 / Qt 6):**
+```powershell
+.\.venv\Scripts\python.exe desktop_main.py
+```
+
+**Terminal / CLI Mode (Preserved):**
 ```powershell
 .\.venv\Scripts\python.exe main.py
 ```
 Say **"Hey JARVIS"** to activate hands-free mode, speak requests, ask follow-up questions without repeating the wake phrase, or say **"Goodbye JARVIS"** to return to idle wake-word detection.
+
+See [DESKTOP_APP_SETUP.md](DESKTOP_APP_SETUP.md), [LOCAL_AI_SETUP.md](LOCAL_AI_SETUP.md), and [HANDS_FREE_VOICE_SETUP.md](HANDS_FREE_VOICE_SETUP.md) for full details.
 
 ### In-Session CLI Commands
 - `/voice on` — Enable hands-free wake-word & microphone monitoring
