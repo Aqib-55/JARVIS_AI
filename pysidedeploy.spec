@@ -29,8 +29,6 @@ android_packages = buildozer==1.6.0,cython==0.29.33
 [qt]
 
 # paths to required qml files. comma separated
-# normally all the qml files required by the project are added automatically
-# design studio projects include the qml files using qt resources
 qml_files =
 
 # excluded qml plugin binaries
@@ -39,9 +37,8 @@ excluded_qml_plugins =
 # qt modules used. comma separated
 modules = Core,Gui,Network,Widgets
 
-# qt plugins used by the application. only relevant for desktop deployment
-# for qt plugins used in android application see [android][plugins]
-plugins = accessiblebridge,egldeviceintegrations,generic,iconengines,imageformats,networkaccess,networkinformation,platforminputcontexts,platforms,platforms/darwin,platformthemes,styles,tls,wayland-decoration-client,wayland-graphics-integration-client,wayland-shell-integration,xcbglintegrations
+# Windows-only Qt plugins needed by the PySide6 Widgets desktop app (no macOS/Linux plugins)
+plugins = accessiblebridge,generic,iconengines,imageformats,networkaccess,networkinformation,platforminputcontexts,platforms,styles,tls
 
 [android]
 
@@ -96,12 +93,10 @@ header_search_paths =
 macos.permissions =
 
 # mode of using nuitka. accepts standalone or onefile. default = standalone
-# standalone creates a folder with the executable and its dependencies.
-# onefile creates a single executable that unpacks itself at every start.
 mode = standalone
 
-# specify any extra nuitka arguments
-extra_args = --quiet --noinclude-qt-translations
+# specify any extra nuitka arguments (Windows MSVC x64, package data for audio/ONNX, static icon & .env.example template)
+extra_args = --quiet --noinclude-qt-translations --msvc=latest --nofollow-import-to=pytest --nofollow-import-to=tests --include-data-file=desktop/resources/icons/jarvis.ico=desktop/resources/icons/jarvis.ico --include-data-file=.env.example=.env.example --include-package-data=sounddevice --include-package-data=faster_whisper --include-package-data=piper --include-package-data=openwakeword --include-package-data=onnxruntime
 
 [buildozer]
 

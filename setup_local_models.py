@@ -15,12 +15,14 @@ After running, verify models are present and start JARVIS:
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+from config.settings import settings
+
+PROJECT_ROOT = settings.APP_DATA_DIR
 
 
 def download_whisper_model(model_size: str = "base", output_dir: Path | None = None) -> bool:
-    """Download the Faster-Whisper model once into local models/stt/ directory."""
-    dest = output_dir or (PROJECT_ROOT / "models" / "stt" / f"faster-whisper-{model_size}")
+    """Download the Faster-Whisper model once into persistent Whisper model directory."""
+    dest = output_dir or (settings.WHISPER_MODEL_DIR / f"faster-whisper-{model_size}")
     dest.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -83,7 +85,7 @@ def download_piper_voice(
 
     Official voice list: https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB
     """
-    dest = output_dir or (PROJECT_ROOT / "models" / "tts")
+    dest = output_dir or settings.PIPER_MODEL_PATH
     dest.mkdir(parents=True, exist_ok=True)
 
     # Construct Hugging Face download URLs
@@ -134,7 +136,7 @@ def download_wakeword_models(output_dir: Path | None = None) -> bool:
       - openWakeWord code: Apache-2.0
       - Pretrained models: CC BY-NC-SA 4.0 (non-commercial)
     """
-    dest = output_dir or (PROJECT_ROOT / "models" / "wakeword")
+    dest = output_dir or settings.WAKE_WORD_MODEL_DIR
     dest.mkdir(parents=True, exist_ok=True)
 
     urls = {

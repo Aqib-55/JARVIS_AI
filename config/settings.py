@@ -10,27 +10,122 @@ TTS: Piper (local only)
 """
 
 import os
+import shutil
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Project root is one level up from config/
+# Source project root (development mode)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_PROJECT_ROOT / ".env")
 
 # Permitted loopback addresses for LOCAL_AI_ONLY mode
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def is_packaged_app() -> bool:
+    """Return True when running from a compiled bundle (e.g., Nuitka / PyInstaller)."""
+    if getattr(sys, "frozen", False):
+        return True
+    if "__compiled__" in globals():
+        return True
+    main_mod = sys.modules.get("__main__")
+    if main_mod is not None and hasattr(main_mod, "__compiled__"):
+        return True
+    return False
+
+
+def resolve_runtime_roots() -> tuple[Path, Path, bool]:
+    """
+    Resolve persistent writable app data root vs. static resource root.
+
+    Returns:
+        (app_data_root, resource_root, isolated_mode)
+    """
+    packaged = is_packaged_app()
+    jarvis_home = os.getenv("JARVIS_HOME", "").strip()
+
+    if packaged:
+        resource_root = Path(sys.executable).resolve().parent
+    else:
+        resource_root = _PROJECT_ROOT
+
+    if jarvis_home:
+        app_data_root = Path(jarvis_home).expanduser().resolve()
+    elif packaged:
+        if os.name == "nt" or sys.platform == "win32":
+            local_app_data = Path(
+                os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+            )
+            app_data_root = local_app_data / "JARVIS_AI"
+        else:
+            app_data_root = Path.home() / ".local" / "share" / "JARVIS_AI"
+    else:
+        app_data_root = _PROJECT_ROOT
+
+    return app_data_root, resource_root, (packaged or bool(jarvis_home))
+
+
+def _ensure_first_run_template(
+    app_data_root: Path,
+    resource_root: Path,
+    create_env_from_template: bool,
+) -> Path:
+    """Ensure persistent runtime directories exist and optionally seed missing .env."""
+    env_file = app_data_root / ".env"
+    if create_env_from_template:
+        app_data_root.mkdir(parents=True, exist_ok=True)
+        for sub in (
+            "data",
+            "logs",
+            "workspace",
+            "recordings",
+            "models/stt",
+            "models/tts",
+            "models/wakeword",
+        ):
+            (app_data_root / sub).mkdir(parents=True, exist_ok=True)
+        if not env_file.exists():
+            for candidate_root in (resource_root, _PROJECT_ROOT):
+                template = candidate_root / ".env.example"
+                if template.is_file():
+                    shutil.copy2(template, env_file)
+                    break
+    return env_file
+
+
+def _resolve_relative_path(raw: str, base_dir: Path, default_rel: str) -> Path:
+    val = raw.strip() if raw else ""
+    target = Path(val) if val else Path(default_rel)
+    return target if target.is_absolute() else (base_dir / target)
+
+
+# Perform initial environment load before importing/initializing settings singleton
+_INIT_APP_ROOT, _INIT_RES_ROOT, _INIT_ISOLATED = resolve_runtime_roots()
+_INIT_ENV_FILE = _ensure_first_run_template(_INIT_APP_ROOT, _INIT_RES_ROOT, _INIT_ISOLATED)
+load_dotenv(_INIT_ENV_FILE, override=False)
 
 
 class Settings:
     """Application settings loaded from environment variables."""
 
     def __init__(self) -> None:
+        app_data_root, resource_root, isolated = resolve_runtime_roots()
+        env_file = _ensure_first_run_template(app_data_root, resource_root, isolated)
+        if env_file != _INIT_ENV_FILE:
+            load_dotenv(env_file, override=False)
+
         # ---- Paths ----
-        self.PROJECT_ROOT: Path = _PROJECT_ROOT
-        self.WORKSPACE_DIR: Path = _PROJECT_ROOT / "workspace"
-        self.DATA_DIR: Path = _PROJECT_ROOT / "data"
-        self.LOG_DIR: Path = _PROJECT_ROOT / "logs"
+        self.IS_PACKAGED: bool = is_packaged_app()
+        self.RESOURCE_ROOT: Path = resource_root
+        self.APP_DATA_DIR: Path = app_data_root
+        self.PROJECT_ROOT: Path = resource_root
+        self.ENV_FILE: Path = env_file
+        self.WORKSPACE_DIR: Path = app_data_root / "workspace"
+        self.DATA_DIR: Path = app_data_root / "data"
+        self.LOG_DIR: Path = app_data_root / "logs"
+        self.RECORDINGS_DIR: Path = app_data_root / "recordings"
+        self.MODELS_DIR: Path = app_data_root / "models"
         self.DB_PATH: Path = self.DATA_DIR / "jarvis.db"
 
         # ---- AI Provider (single authoritative setting) ----
@@ -88,12 +183,11 @@ class Settings:
         self.VOICE_MICROPHONE_INDEX: int | None = int(raw_mic_idx) if raw_mic_idx else None
 
         # Local STT model storage directory and verified local model path
-        self.WHISPER_MODEL_DIR: Path = _PROJECT_ROOT / "models" / "stt"
+        self.WHISPER_MODEL_DIR: Path = self.MODELS_DIR / "stt"
         raw_whisper_path = os.getenv("WHISPER_MODEL_PATH", "").strip()
         if raw_whisper_path:
-            candidate = Path(raw_whisper_path)
-            self.WHISPER_MODEL_PATH: Path = (
-                candidate if candidate.is_absolute() else (_PROJECT_ROOT / candidate)
+            self.WHISPER_MODEL_PATH: Path = _resolve_relative_path(
+                raw_whisper_path, app_data_root, f"models/stt/faster-whisper-{self.WHISPER_MODEL_SIZE}"
             )
         else:
             self.WHISPER_MODEL_PATH = (
@@ -105,10 +199,10 @@ class Settings:
         self.WAKE_WORD_PHRASE: str = os.getenv("WAKE_WORD_PHRASE", "hey jarvis").strip()
         self.WAKE_WORD_ENGINE: str = os.getenv("WAKE_WORD_ENGINE", "openwakeword").lower().strip()
         self.WAKE_WORD_THRESHOLD: float = float(os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
-        raw_ww_dir = os.getenv("WAKE_WORD_MODEL_DIR", "models/wakeword").strip()
-        ww_candidate = Path(raw_ww_dir)
-        self.WAKE_WORD_MODEL_DIR: Path = (
-            ww_candidate if ww_candidate.is_absolute() else (_PROJECT_ROOT / ww_candidate)
+        self.WAKE_WORD_MODEL_DIR: Path = _resolve_relative_path(
+            os.getenv("WAKE_WORD_MODEL_DIR", "models/wakeword"),
+            app_data_root,
+            "models/wakeword",
         )
         self.CONVERSATION_TIMEOUT_SECONDS: float = float(
             os.getenv("CONVERSATION_TIMEOUT_SECONDS", "25")
@@ -122,17 +216,27 @@ class Settings:
         self.VOICE_OUTPUT_ENABLED: bool = os.getenv("VOICE_OUTPUT_ENABLED", "true").lower() in ("true", "1", "yes")
 
         # Piper TTS configuration
-        self.PIPER_MODEL_PATH: Path = _PROJECT_ROOT / os.getenv("PIPER_MODEL_PATH", "models/tts")
+        self.PIPER_MODEL_PATH: Path = _resolve_relative_path(
+            os.getenv("PIPER_MODEL_PATH", "models/tts"),
+            app_data_root,
+            "models/tts",
+        )
         self.PIPER_VOICE: str = os.getenv("PIPER_VOICE", "en_GB-alan-medium")
 
         # Ensure required directories exist
         self._create_directories()
 
     def _create_directories(self) -> None:
-        """Create required application directories if they don't exist."""
-        for directory in [self.WORKSPACE_DIR, self.DATA_DIR, self.LOG_DIR,
-                          self.WHISPER_MODEL_DIR, self.PIPER_MODEL_PATH,
-                          self.WAKE_WORD_MODEL_DIR]:
+        """Create required writable application directories if they don't exist."""
+        for directory in [
+            self.WORKSPACE_DIR,
+            self.DATA_DIR,
+            self.LOG_DIR,
+            self.RECORDINGS_DIR,
+            self.WHISPER_MODEL_DIR,
+            self.PIPER_MODEL_PATH,
+            self.WAKE_WORD_MODEL_DIR,
+        ]:
             directory.mkdir(parents=True, exist_ok=True)
 
     def _get_ollama_host(self) -> str:
