@@ -58,7 +58,7 @@ def create_jarvis_icon() -> QIcon:
 def ensure_app_ico(output_path: Path) -> Path:
     """Save Windows .ico or .png icon for packaging and Windows taskbar use."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    if not output_path.exists():
+    if not output_path.exists() or output_path.stat().st_size == 0:
         fmt = "ICO" if output_path.suffix.lower() == ".ico" else None
         pixmap = create_jarvis_pixmap(256)
         if fmt:

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from config.settings import settings
 from desktop.theme import COLORS
 
 
@@ -129,7 +130,7 @@ class MemoryPage(QWidget):
         root.addWidget(self._tabs, stretch=1)
 
         note = QLabel(
-            "Connected directly to existing SQLite memory (`data/jarvis.db`). "
+            f"Connected directly to SQLite memory (`{settings.DB_PATH}`). "
             "Conversation/task audit rows are read-only; secrets are never stored or displayed."
         )
         note.setStyleSheet(f"font-size: 11px; color: {COLORS['text_muted']};")

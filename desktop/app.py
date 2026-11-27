@@ -7,13 +7,14 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from config.settings import settings
 from desktop import APP_NAME, APP_VERSION
 from desktop.main_window import JarvisMainWindow
-from desktop.resources.icons.icon_factory import create_jarvis_icon, ensure_app_ico
+from desktop.resources.icons.icon_factory import create_jarvis_icon
 from desktop.services.backend_adapter import BackendAdapter
 from desktop.theme import build_stylesheet
 
@@ -58,8 +59,13 @@ def run_desktop_app(argv: list[str] | None = None) -> int:
     app = QApplication(argv or sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    app.setWindowIcon(create_jarvis_icon())
-    ensure_app_ico(Path(__file__).resolve().parent / "resources" / "icons" / "jarvis.ico")
+    bundled_ico = settings.RESOURCE_ROOT / "desktop" / "resources" / "icons" / "jarvis.ico"
+    if not bundled_ico.exists():
+        bundled_ico = Path(__file__).resolve().parent / "resources" / "icons" / "jarvis.ico"
+    if bundled_ico.exists():
+        app.setWindowIcon(QIcon(str(bundled_ico)))
+    else:
+        app.setWindowIcon(create_jarvis_icon())
     app.setStyleSheet(build_stylesheet())
 
     instance_server = _acquire_single_instance()

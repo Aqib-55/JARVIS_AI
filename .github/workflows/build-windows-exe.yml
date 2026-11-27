@@ -1,0 +1,177 @@
+name: Build JARVIS AI Windows x64 Desktop
+
+on:
+  push:
+    branches:
+      - feature/complete-local-ai-migration
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13 (64-bit)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: "x64"
+
+      - name: Initialize Visual Studio 2022 MSVC x64 Developer Environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify MSVC cl.exe and dumpbin.exe
+        shell: cmd
+        run: |
+          where cl.exe
+          where dumpbin.exe
+          cl.exe 2>&1 | findstr /i "Version"
+
+      - name: Install project and pinned packaging dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt "PySide6==6.12.0" "Nuitka==4.1.1"
+          python -c "import PySide6, shiboken6, nuitka; print('PySide6:', PySide6.__version__); print('shiboken6:', shiboken6.__version__)"
+
+      - name: Pre-build generate and verify Windows application icon
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python scripts/prepare_desktop_build.py
+
+      - name: Run Python source, path resolution, and PySide6 UI tests
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pytest tests/test_settings.py tests/test_runtime_paths.py tests/test_desktop_ui.py tests/test_registry.py tests/test_permissions.py tests/test_agent_lifecycle.py -v
+
+      - name: Compile standalone Windows x64 executable with pyside6-deploy (Nuitka + MSVC)
+        shell: cmd
+        run: |
+          pyside6-deploy -c pysidedeploy.spec --force --mode standalone --verbose
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Locate compiled executable, run smoke test outside repo, and package clean ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $distSearchRoots = @("dist\desktop", "deployment", ".") | Where-Object { Test-Path $_ }
+          $exe = $null
+          foreach ($root in $distSearchRoots) {
+            $exe = Get-ChildItem -Path $root -Recurse -Filter "*.exe" -File |
+              Where-Object { $_.FullName -notmatch "\\(\.venv|build|\.git)\\" -and $_.DirectoryName -like "*.dist*" } |
+              Select-Object -First 1
+            if ($exe) { break }
+          }
+          if (-not $exe) {
+            throw "Compiled standalone .exe was not found under dist/desktop."
+          }
+
+          Write-Host "Found compiled executable: $($exe.FullName)"
+          $distDir = $exe.Directory.FullName
+
+          # Verify standalone directory integrity and run smoke test from OUTSIDE the repository root
+          $smokeHome = Join-Path $env:RUNNER_TEMP "jarvis_smoke_appdata"
+          $outsideCwd = Join-Path $env:RUNNER_TEMP "jarvis_outside_cwd"
+          New-Item -ItemType Directory -Force -Path $smokeHome | Out-Null
+          New-Item -ItemType Directory -Force -Path $outsideCwd | Out-Null
+
+          Push-Location $outsideCwd
+          try {
+            $env:JARVIS_HOME = $smokeHome
+            $env:QT_QPA_PLATFORM = "offscreen"
+            $proc = Start-Process -FilePath $exe.FullName -ArgumentList "--packaging-smoke-test" -WorkingDirectory $outsideCwd -NoNewWindow -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+              throw "Executable packaging smoke test failed with exit code $($proc.ExitCode)"
+            }
+          } finally {
+            Remove-Item Env:JARVIS_HOME -ErrorAction SilentlyContinue
+            Pop-Location
+          }
+
+          # Verify smoke test wrote runtime config/data cleanly to persistent path, not inside distDir
+          if (-not (Test-Path (Join-Path $smokeHome ".env"))) {
+            throw "Expected persistent first-run .env was not created inside JARVIS_HOME ($smokeHome)"
+          }
+          if (Test-Path (Join-Path $distDir "data\jarvis.db")) {
+            throw "Database was unexpectedly created inside standalone distribution folder: $distDir"
+          }
+
+          # Stage clean portable distribution folder
+          $stageRoot = Join-Path $env:RUNNER_TEMP "JARVIS_AI_stage"
+          $stageApp = Join-Path $stageRoot "JARVIS_AI"
+          if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
+          New-Item -ItemType Directory -Force -Path $stageApp | Out-Null
+
+          Copy-Item -Path (Join-Path $distDir "*") -Destination $stageApp -Recurse -Force
+          if (-not (Test-Path (Join-Path $stageApp ".env.example"))) {
+            Copy-Item -Path ".env.example" -Destination (Join-Path $stageApp ".env.example") -Force
+          }
+
+          # Explicitly purge any forbidden files/directories if accidentally present
+          foreach ($relForbidden in @(".env", "models", "data", "logs", "recordings", "tests", ".venv", "__pycache__", ".pytest_cache")) {
+            $fp = Join-Path $stageApp $relForbidden
+            if (Test-Path $fp) { Remove-Item -Recurse -Force $fp }
+          }
+          Get-ChildItem -Path $stageApp -Recurse -Include "*.db", "*.sqlite", "*.sqlite3", "*.log" -File |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+
+          # Write README_FIRST_RUN.txt inside portable distribution
+          $readmeLines = @(
+            "JARVIS AI — Portable Windows x64 Desktop Distribution",
+            "======================================================",
+            "",
+            "Executable: $($exe.Name)",
+            "",
+            "1. Launch",
+            "   Extract the full ZIP folder first (do NOT run directly from inside the ZIP preview).",
+            "   Double-click $($exe.Name) to start the JARVIS AI Desktop window.",
+            "",
+            "2. Where JARVIS Stores Your Data (Persistent User Folder)",
+            "   %LOCALAPPDATA%\JARVIS_AI\",
+            "     - .env             (seeded from .env.example on first launch)",
+            "     - data\jarvis.db   (SQLite memory & conversation history)",
+            "     - logs\            (application logs)",
+            "     - workspace\       (sandboxed workspace for file tools)",
+            "     - recordings\      (temporary voice captures)",
+            "     - models\          (Faster-Whisper, Piper TTS, openWakeWord ONNX weights)",
+            "",
+            "   Optional override: set environment variable JARVIS_HOME before launching.",
+            "",
+            "3. Required Separate Runtime Prerequisites",
+            "   This ZIP does NOT bundle Ollama, qwen3.5:4b, or large speech/wake-word models:",
+            "   - Install Ollama for Windows: https://ollama.com",
+            "   - Pull the local LLM: ollama pull qwen3.5:4b",
+            "   - Place local speech/wake models inside %LOCALAPPDATA%\JARVIS_AI\models\",
+            "",
+            "4. Smoke Test Command",
+            "   .\$($exe.Name) --packaging-smoke-test"
+          )
+          Set-Content -Path (Join-Path $stageApp "README_FIRST_RUN.txt") -Value ($readmeLines -join "`r`n") -Encoding UTF8
+
+          # Create ZIP distribution in repo root
+          $zipPath = Join-Path (Get-Location) "JARVIS_AI-Windows-x64.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path $stageApp -DestinationPath $zipPath -CompressionLevel Optimal
+
+          if (-not (Test-Path $zipPath) -or (Get-Item $zipPath).Length -eq 0) {
+            throw "Distribution ZIP creation failed: $zipPath"
+          }
+          Write-Host "Created clean distribution ZIP: $zipPath ($([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB)"
+
+      - name: Upload JARVIS_AI-Windows-x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS_AI-Windows-x64
+          path: JARVIS_AI-Windows-x64.zip
+          if-no-files-found: error
